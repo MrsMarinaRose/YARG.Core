@@ -82,6 +82,53 @@ namespace YARG.Core.Game
             }
         }
 
+        public class SixFretGuitarPreset
+        {
+            public bool AntiGhosting = true;
+            public bool InfiniteFrontEnd = false;
+
+            public double HopoLeniency = 0.08;
+
+            public double StrumLeniency = 0.05;
+            public double StrumLeniencySmall = 0.025;
+
+            public HitWindowPreset HitWindow = new()
+            {
+                MaxWindow = 0.14,
+                MinWindow = 0.14,
+                IsDynamic = false,
+                FrontToBackRatio = 1.0
+            };
+
+            public SixFretGuitarPreset Copy()
+            {
+                return new SixFretGuitarPreset
+                {
+                    AntiGhosting = AntiGhosting,
+                    InfiniteFrontEnd = InfiniteFrontEnd,
+                    HopoLeniency = HopoLeniency,
+                    StrumLeniency = StrumLeniency,
+                    StrumLeniencySmall = StrumLeniencySmall,
+                    HitWindow = HitWindow,
+                };
+            }
+
+            public GuitarEngineParameters Create(float[] starMultiplierThresholds, bool isBass)
+            {
+                var hitWindow = HitWindow.Create();
+                return new GuitarEngineParameters(
+                    hitWindow,
+                    isBass ? BASS_MAX_MULTIPLIER : DEFAULT_MAX_MULTIPLIER,
+                    starMultiplierThresholds,
+                    HopoLeniency,
+                    StrumLeniency,
+                    StrumLeniencySmall,
+                    DEFAULT_WHAMMY_BUFFER,
+                    InfiniteFrontEnd,
+                    AntiGhosting);
+            }
+        }
+
         /// <summary>
         /// The engine preset for four and five lane drums. These two game modes
         /// use the same engine, so there's no point in splitting them up.

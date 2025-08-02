@@ -5,12 +5,14 @@
         public FiveFretGuitarPreset FiveFretGuitar;
         public DrumsPreset          Drums;
         public VocalsPreset         Vocals;
+        public SixFretGuitarPreset SixFretGuitar;
 
         public EnginePreset(string name, bool defaultPreset = false) : base(name, defaultPreset)
         {
             FiveFretGuitar = new FiveFretGuitarPreset();
             Drums = new DrumsPreset();
             Vocals = new VocalsPreset();
+            SixFretGuitar = new SixFretGuitarPreset();
         }
 
         public override BasePreset CopyWithNewName(string name)
@@ -20,6 +22,7 @@
                 FiveFretGuitar = FiveFretGuitar.Copy(),
                 Drums = Drums.Copy(),
                 Vocals = Vocals.Copy(),
+                SixFretGuitar = SixFretGuitar.Copy()
             };
         }
     }
