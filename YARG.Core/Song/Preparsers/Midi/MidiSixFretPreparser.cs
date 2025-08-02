@@ -1,4 +1,6 @@
-﻿using YARG.Core.IO;
+﻿using System;
+using System.Text;
+using YARG.Core.IO;
 
 namespace YARG.Core.Song
 {
@@ -56,6 +58,28 @@ namespace YARG.Core.Song
                 }
             }
             return false;
+        }
+        
+        private const int SYSEX_DIFFICULTY_INDEX = 4;
+        private const int SYSEX_TYPE_INDEX = 5;
+        private const int SYSEX_STATUS_INDEX = 6;
+        private const int OPEN_NOTE_TYPE = 1;
+        private const byte SYSEX_ALL_DIFFICULTIES = 0xFF;
+        private const int GREEN_INDEX = 1;
+
+        protected override void ParseSysEx(ReadOnlySpan<byte> str)
+        {
+            if (str.StartsWith(SYSEXTAG) && str[SYSEX_TYPE_INDEX] == OPEN_NOTE_TYPE)
+            {
+                int status = str[SYSEX_STATUS_INDEX] == 0 ? 1 : 0;
+                if (str[SYSEX_DIFFICULTY_INDEX] == SYSEX_ALL_DIFFICULTIES)
+                {
+                    for (int diff = 0; diff < NUM_DIFFICULTIES; ++diff)
+                        LANEINDICES[NOTES_PER_DIFFICULTY * diff + GREEN_INDEX] = status;
+                }
+                else
+                    LANEINDICES[NOTES_PER_DIFFICULTY * str[SYSEX_DIFFICULTY_INDEX] + GREEN_INDEX] = status;
+            }
         }
     }
 }
