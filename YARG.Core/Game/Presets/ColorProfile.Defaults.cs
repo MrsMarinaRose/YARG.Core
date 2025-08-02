@@ -193,6 +193,14 @@ namespace YARG.Core.Game
                 BlueStarpower = CircularStarpower,
                 OrangeStarpower = CircularStarpower,
                 GreenStarpower = CircularStarpower,
+            },
+
+            SixFretGuitar = new SixFretGuitarColors
+            {
+                WhiteNote = WhiteNotes,
+                BlackNote = BlackNotes,
+                LightParticles = WhiteNotes,
+                DarkParticles = BlackNotes
             }
         };
 
