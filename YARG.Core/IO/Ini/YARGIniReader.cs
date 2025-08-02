@@ -8,17 +8,26 @@ namespace YARG.Core.IO.Ini
 {
     public static class YARGIniReader
     {
-        public static Dictionary<string, IniSection> ReadIniFile(string iniFile, Dictionary<string, Dictionary<string, IniModifierCreator>> sections)
+        public static Dictionary<string, IniModifierCollection> ReadIniFile(string iniPath, Dictionary<string, Dictionary<string, IniModifierOutline>> lookups)
         {
             try
             {
-                byte[] bytes = File.ReadAllBytes(iniFile);
-                var byteReader = YARGTextLoader.TryLoadByteText(bytes);
-                if (byteReader != null)
-                    return ProcessIni(byteReader, sections);
+                using var bytes = FixedArray.LoadFile(iniPath);
+                if (YARGTextReader.TryUTF8(bytes, out var byteContainer))
+                {
+                    return ProcessIni(ref byteContainer, lookups);
+                }
 
-                var charReader = YARGTextLoader.LoadCharText(bytes);
-                return ProcessIni(charReader, sections);
+                using var chars = YARGTextReader.TryUTF16Cast(bytes);
+                if (chars != null)
+                {
+                    var charContainer = YARGTextReader.CreateUTF16Container(chars);
+                    return ProcessIni(ref charContainer, lookups);
+                }
+
+                using var ints = YARGTextReader.CastUTF32(bytes);
+                var intContainer = YARGTextReader.CreateUTF32Container(ints);
+                return ProcessIni(ref intContainer, lookups);
 
             }
             catch (Exception ex)
@@ -28,79 +37,56 @@ namespace YARG.Core.IO.Ini
             }
         }
 
-        private static Dictionary<string, IniSection> ProcessIni<TChar, TDecoder>(YARGTextReader<TChar, TDecoder> reader, Dictionary<string, Dictionary<string, IniModifierCreator>> sections)
-            where TChar : unmanaged, IConvertible
-            where TDecoder : IStringDecoder<TChar>, new()
+        private static Dictionary<string, IniModifierCollection> ProcessIni<TChar>(ref YARGTextContainer<TChar> container, Dictionary<string, Dictionary<string, IniModifierOutline>> lookups)
+            where TChar : unmanaged, IConvertible, IEquatable<TChar>
         {
-            Dictionary<string, IniSection> modifierMap = new();
-            while (TrySection(reader, out string section))
+            Dictionary<string, IniModifierCollection> collections = new();
+            while (TrySection(ref container, out string section))
             {
-                if (sections.TryGetValue(section, out var nodes))
-                    modifierMap[section] = ExtractModifiers(reader, ref nodes);
+                if (lookups.TryGetValue(section, out var nodes))
+                {
+                    collections[section] = ExtractModifiers(ref container, ref nodes);
+                }
                 else
-                    reader.SkipLinesUntil('[');
+                {
+                    YARGTextReader.SkipLinesUntil(ref container, TextConstants<TChar>.OPEN_BRACKET);
+                }
             }
-            return modifierMap;
+            return collections;
         }
 
-        private static bool TrySection<TChar, TDecoder>(YARGTextReader<TChar, TDecoder> reader, out string section)
-            where TChar : unmanaged, IConvertible
-            where TDecoder : IStringDecoder<TChar>, new()
+        private static bool TrySection<TChar>(ref YARGTextContainer<TChar> container, out string section)
+            where TChar : unmanaged, IConvertible, IEquatable<TChar>
         {
-            section = string.Empty;
-            if (reader.Container.IsEndOfFile())
-                return false;
-
-            if (!reader.Container.IsCurrentCharacter('['))
+            if (container.IsAtEnd() || (container.Get() != '[' && !YARGTextReader.SkipLinesUntil(ref container, TextConstants<TChar>.OPEN_BRACKET)))
             {
-                reader.SkipLinesUntil('[');
-                if (reader.Container.IsEndOfFile())
-                    return false;
+                section = string.Empty;
+                return false;
             }
-            section = reader.PeekLine().ToLower();
+            section = YARGTextReader.PeekLine(ref container).ToLower();
             return true;
         }
 
-        private static IniSection ExtractModifiers<TChar, TDecoder>(YARGTextReader<TChar, TDecoder> reader, ref Dictionary<string, IniModifierCreator> validNodes)
-            where TChar : unmanaged, IConvertible
-            where TDecoder : IStringDecoder<TChar>, new()
+        private static IniModifierCollection ExtractModifiers<TChar>(ref YARGTextContainer<TChar> container, ref Dictionary<string, IniModifierOutline> outlines)
+            where TChar : unmanaged, IConvertible, IEquatable<TChar>
         {
-            Dictionary<string, List<IniModifier>> modifiers = new();
-            reader.GotoNextLine();
-            while (IsStillCurrentSection(reader))
+            IniModifierCollection collection = new();
+            while (IsStillCurrentSection(ref container))
             {
-                string name = reader.ExtractModifierName().ToLower();
-                if (validNodes.TryGetValue(name, out var node))
+                string name = YARGTextReader.ExtractModifierName(ref container).ToLower();
+                if (outlines.TryGetValue(name, out var outline))
                 {
-                    var mod = node.CreateModifier(reader);
-                    if (modifiers.TryGetValue(node.outputName, out var list))
-                        list.Add(mod);
-                    else
-                        modifiers.Add(node.outputName, new() { mod });
+                    collection.Add(ref container, in outline, false);
                 }
-                reader.GotoNextLine();
             }
-            return new IniSection(modifiers);
+            return collection;
         }
 
-        private static bool IsStillCurrentSection<TChar, TDecoder>(YARGTextReader<TChar, TDecoder> reader)
-            where TChar : unmanaged, IConvertible
-            where TDecoder : IStringDecoder<TChar>, new()
+        private static bool IsStillCurrentSection<TChar>(ref YARGTextContainer<TChar> container)
+            where TChar : unmanaged, IConvertible, IEquatable<TChar>
         {
-            return !reader.Container.IsEndOfFile() && !reader.Container.IsCurrentCharacter('[');
-        }
-
-        private static bool FindNextTrack<TChar, TDecoder>(YARGTextReader<TChar, TDecoder> reader)
-            where TChar : unmanaged, IConvertible
-            where TDecoder : IStringDecoder<TChar>, new()
-        {
-            while (reader.Container.Position < reader.Container.Length)
-            {
-                if (reader.Container.Data[reader.Container.Position].ToChar(null) == '[')
-                    return true;
-                ++reader.Container.Position;
-            }
-            return false;
+            YARGTextReader.GotoNextLine(ref container);
+            return !container.IsAtEnd() && container.Get() != '[';
         }
     }
 }

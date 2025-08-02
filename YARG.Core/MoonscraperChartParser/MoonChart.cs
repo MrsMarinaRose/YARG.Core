@@ -29,6 +29,8 @@ namespace MoonscraperChartEditor.Song
         /// </summary>
         public List<MoonText> events { get; private set; } = new();
 
+        public bool IsEmpty => notes.Count == 0 && specialPhrases.Count == 0 && events.Count == 0;
+
         /// <summary>
         /// Creates a new chart object.
         /// </summary>
@@ -39,7 +41,8 @@ namespace MoonscraperChartEditor.Song
             gameMode = _gameMode;
         }
 
-        public MoonChart(MoonSong song, MoonSong.MoonInstrument Instrument) : this(song, MoonSong.InstrumentToChartGameMode(Instrument))
+        public MoonChart(MoonSong song, MoonSong.MoonInstrument Instrument)
+            : this(song, MoonSong.InstrumentToChartGameMode(Instrument))
         {
         }
 
@@ -80,17 +83,13 @@ namespace MoonscraperChartEditor.Song
             return MoonObjectHelper.Remove(ev, events);
         }
 
-        public bool IsOccupied()
-        {
-            return notes.Count > 0 || specialPhrases.Count > 0 || events.Count > 0;
-        }
-
         public enum GameMode
         {
             Guitar,
             Drums,
             GHLGuitar,
             ProGuitar,
+            ProKeys,
             Vocals,
         }
     }

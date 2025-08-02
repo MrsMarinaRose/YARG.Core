@@ -1,9 +1,30 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace YARG.Core.Song
 {
+    public enum VocalGender : byte
+    {
+        Female,
+        Male,
+        Unspecified,
+    };
+
+    public enum SongTonality : byte
+    {
+        Major,
+        Minor,
+        Unspecified,
+    };
+
+    public enum EncodingType : byte
+    {
+        ASCII,
+        Latin1,
+        UTF8,
+        UTF16,
+        UTF32
+    };
+
     public struct RBMetadata
     {
         public static readonly RBMetadata Default = new()
@@ -11,29 +32,39 @@ namespace YARG.Core.Song
             SongID = string.Empty,
             DrumBank = string.Empty,
             VocalPercussionBank = string.Empty,
-            VocalGender = true
+            AnimTempo = 0,
+            VocalSongScrollSpeed = 0,
+            VocalTonicNote = 0,
+            VenueVersion = 0,
+            TuningOffsetCents = 0,
+            VocalGender = VocalGender.Unspecified,
+            SongTonality = SongTonality.Unspecified,
+            Soloes = Array.Empty<string>(),
+            VideoVenues = Array.Empty<string>(),
+            RealGuitarTuning = Array.Empty<int>(),
+            RealBassTuning = Array.Empty<int>(),
+            MidiEncoding = EncodingType.Latin1
         };
 
         public string SongID;
-        public uint AnimTempo;
         public string DrumBank;
         public string VocalPercussionBank;
+
+        public uint AnimTempo;
         public uint VocalSongScrollSpeed;
-        public bool VocalGender; //true for male, false for female
-        //public bool HasAlbumArt;
-        //public bool IsFake;
         public uint VocalTonicNote;
-        public bool SongTonality; // 0 = major, 1 = minor
-        public int TuningOffsetCents;
         public uint VenueVersion;
+        public int  TuningOffsetCents;
 
-        public string[]? Soloes;
-        public string[]? VideoVenues;
+        public VocalGender VocalGender;
+        public SongTonality SongTonality;
+        
+        public string[] Soloes;
+        public string[] VideoVenues;
 
-        public int[]? RealGuitarTuning;
-        public int[]? RealBassTuning;
+        public int[] RealGuitarTuning;
+        public int[] RealBassTuning;
 
-        public RBAudio<int> Indices;
-        public RBAudio<float> Panning;
+        public EncodingType MidiEncoding;
     }
 }

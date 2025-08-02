@@ -2,20 +2,19 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Melanchall.DryWetMidi.Core;
+using YARG.Core.Logging;
 
 namespace YARG.Core.Chart
 {
     /// <summary>
     /// The chart data for a song.
     /// </summary>
-    public class SongChart
+    public partial class SongChart
     {
         public uint Resolution => SyncTrack.Resolution;
 
         public List<TextEvent> GlobalEvents { get; set; } = new();
         public List<Section> Sections { get; set; } = new();
-
-        public uint? EndMarkerTick { get; set; }
 
         public SyncTrack SyncTrack { get; set; }
         public VenueTrack VenueTrack { get; set; } = new();
@@ -60,7 +59,7 @@ namespace YARG.Core.Chart
         public InstrumentTrack<DrumNote> ProDrums { get; set; } = new(Instrument.ProDrums);
         public InstrumentTrack<DrumNote> FiveLaneDrums { get; set; } = new(Instrument.FiveLaneDrums);
 
-        // public InstrumentTrack<DrumNote> TrueDrums { get; set; } = new(Instrument.TrueDrums);
+        // public InstrumentTrack<DrumNote> EliteDrums { get; set; } = new(Instrument.EliteDrums);
 
         public IEnumerable<InstrumentTrack<DrumNote>> DrumsTracks
         {
@@ -88,7 +87,7 @@ namespace YARG.Core.Chart
             }
         }
 
-        // public InstrumentTrack<ProKeysNote> ProKeys { get; set; } = new(Instrument.ProKeys);
+        public InstrumentTrack<ProKeysNote> ProKeys { get; set; } = new(Instrument.ProKeys);
 
         public VocalsTrack Vocals { get; set; } = new(Instrument.Vocals);
         public VocalsTrack Harmony { get; set; } = new(Instrument.Harmony);
@@ -133,129 +132,92 @@ namespace YARG.Core.Chart
             ProDrums = loader.LoadDrumsTrack(Instrument.ProDrums);
             FiveLaneDrums = loader.LoadDrumsTrack(Instrument.FiveLaneDrums);
 
-            // TrueDrums = loader.LoadDrumsTrack(Instrument.TrueDrums);
+            // EliteDrums = loader.LoadDrumsTrack(Instrument.EliteDrums);
 
             ProGuitar_17Fret = loader.LoadProGuitarTrack(Instrument.ProGuitar_17Fret);
             ProGuitar_22Fret = loader.LoadProGuitarTrack(Instrument.ProGuitar_22Fret);
             ProBass_17Fret = loader.LoadProGuitarTrack(Instrument.ProBass_17Fret);
             ProBass_22Fret = loader.LoadProGuitarTrack(Instrument.ProBass_22Fret);
 
-            // ProKeys = loader.LoadProKeysTrack(Instrument.ProKeys);
+            ProKeys = loader.LoadProKeysTrack(Instrument.ProKeys);
 
             Vocals = loader.LoadVocalsTrack(Instrument.Vocals);
             Harmony = loader.LoadVocalsTrack(Instrument.Harmony);
 
             // Dj = loader.LoadDjTrack(Instrument.Dj);
 
-            PostProcessSections();
-
             // Ensure beatlines are present
             if (SyncTrack.Beatlines is null or { Count: < 1 })
             {
                 SyncTrack.GenerateBeatlines(GetLastTick());
             }
-        }
 
-        private void PostProcessSections()
-        {
-            uint lastTick = GetLastTick();
+            // Use beatlines to place auto-generated drum activation phrases for charts without manually authored phrases
+            CreateDrumActivationPhrases();
+            // Add range shift phrases, done here since they are parsed from text events
+            CreateRangeShiftPhrases();
 
-            // If there are no sections in the chart, auto-generate some sections.
-            // This prevents issues with songs with no sections, such as in practice mode.
-            if (Sections.Count == 0)
-            {
-                const int AUTO_GEN_SECTION_COUNT = 10;
-                ReadOnlySpan<double> factors = stackalloc double[AUTO_GEN_SECTION_COUNT]{
-                    0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0
-                };
-                
-                uint startTick = 0;
-                double startTime = SyncTrack.TickToTime(0);
-
-                for (int i = 0; i < AUTO_GEN_SECTION_COUNT; i++)
-                {
-                    uint endTick = (uint)(lastTick * factors[i]);
-                    double endTime = SyncTrack.TickToTime(endTick);
-
-                    // "0% - 10%", "10% - 20%", etc.
-                    var sectionName = $"{i * 10}% - {i + 1}0%";
-
-                    var section = new Section(sectionName, startTime, startTick)
-                    {
-                        TickLength = endTick - startTick,
-                        TimeLength = endTime - startTime,
-                    };
-
-                    Sections.Add(section);
-
-                    // Set the start of the next section to the end of this one
-                    startTick = endTick;
-                    startTime = endTime;
-                }
-            }
-            else
-            {
-                // Otherwise make sure the length of the last section is correct
-                var lastSection = Sections[^1];
-                lastSection.TickLength = lastTick - lastSection.Tick;
-                lastSection.TimeLength = SyncTrack.TickToTime(lastTick) - lastSection.Time;
-            }
+            PostProcessSections();
+            FixDrumPhraseEnds();
         }
 
         public void Append(SongChart song)
         {
-            if (song.FiveFretGuitar.IsOccupied())
+            if (!song.FiveFretGuitar.IsEmpty)
                 FiveFretGuitar = song.FiveFretGuitar;
 
-            if (song.FiveFretCoop.IsOccupied())
+            if (!song.FiveFretCoop.IsEmpty)
                 FiveFretCoop = song.FiveFretCoop;
 
-            if (song.FiveFretRhythm.IsOccupied())
+            if (!song.FiveFretRhythm.IsEmpty)
                 FiveFretRhythm = song.FiveFretRhythm;
 
-            if (song.FiveFretBass.IsOccupied())
+            if (!song.FiveFretBass.IsEmpty)
                 FiveFretBass = song.FiveFretBass;
 
-            if (song.Keys.IsOccupied())
+            if (!song.Keys.IsEmpty)
                 Keys = song.Keys;
 
-            if (song.SixFretGuitar.IsOccupied())
+            if (!song.SixFretGuitar.IsEmpty)
                 SixFretGuitar = song.SixFretGuitar;
 
-            if (song.SixFretCoop.IsOccupied())
+            if (!song.SixFretCoop.IsEmpty)
                 SixFretCoop = song.SixFretCoop;
 
-            if (song.SixFretRhythm.IsOccupied())
+            if (!song.SixFretRhythm.IsEmpty)
                 SixFretRhythm = song.SixFretRhythm;
 
-            if (song.SixFretBass.IsOccupied())
+            if (!song.SixFretBass.IsEmpty)
                 SixFretBass = song.SixFretBass;
 
-            if (song.FourLaneDrums.IsOccupied())
+            if (!song.FourLaneDrums.IsEmpty)
                 FourLaneDrums = song.FourLaneDrums;
 
-            if (song.ProDrums.IsOccupied())
+            if (!song.ProDrums.IsEmpty)
                 ProDrums = song.ProDrums;
 
-            if (song.FiveLaneDrums.IsOccupied())
+            if (!song.FiveLaneDrums.IsEmpty)
                 FiveLaneDrums = song.FiveLaneDrums;
 
-            if (song.ProGuitar_17Fret.IsOccupied())
+            if (!song.ProGuitar_17Fret.IsEmpty)
                 ProGuitar_17Fret = song.ProGuitar_17Fret;
 
-            if (song.ProGuitar_22Fret.IsOccupied())
+            if (!song.ProGuitar_22Fret.IsEmpty)
                 ProGuitar_22Fret = song.ProGuitar_22Fret;
 
-            if (song.ProBass_17Fret.IsOccupied())
+            if (!song.ProBass_17Fret.IsEmpty)
                 ProBass_17Fret = song.ProBass_17Fret;
 
-            if (song.ProBass_22Fret.IsOccupied())
+            if (!song.ProBass_22Fret.IsEmpty)
                 ProBass_22Fret = song.ProBass_22Fret;
 
-            if (song.Vocals.IsOccupied())
+            if (!song.ProKeys.IsEmpty)
+                ProKeys = song.ProKeys;
+
+            if (!song.Vocals.IsEmpty)
                 Vocals = song.Vocals;
 
-            if (song.Harmony.IsOccupied())
+            if (!song.Harmony.IsEmpty)
                 Harmony = song.Harmony;
         }
 
@@ -271,7 +233,7 @@ namespace YARG.Core.Chart
             return new(loader);
         }
 
-        public static SongChart FromDotChart(in ParseSettings settings, string chartText)
+        public static SongChart FromDotChart(in ParseSettings settings, ReadOnlySpan<char> chartText)
         {
             var loader = MoonSongLoader.LoadDotChart(settings, chartText);
             return new(loader);
@@ -345,13 +307,18 @@ namespace YARG.Core.Chart
             double totalStartTime = 0;
 
             // Tracks
+
             totalStartTime = Math.Min(TrackMin(FiveFretTracks), totalStartTime);
             totalStartTime = Math.Min(TrackMin(SixFretTracks), totalStartTime);
             totalStartTime = Math.Min(TrackMin(DrumsTracks), totalStartTime);
             totalStartTime = Math.Min(TrackMin(ProGuitarTracks), totalStartTime);
+
+            totalStartTime = Math.Min(ProKeys.GetStartTime(), totalStartTime);
+
             totalStartTime = Math.Min(VoxMin(VocalsTracks), totalStartTime);
 
             // Global
+
             totalStartTime = Math.Min(Lyrics.GetStartTime(), totalStartTime);
 
             // Deliberately excluded, as they're not major contributors to the chart bounds
@@ -373,13 +340,18 @@ namespace YARG.Core.Chart
             double totalEndTime = 0;
 
             // Tracks
+
             totalEndTime = Math.Max(TrackMax(FiveFretTracks), totalEndTime);
             totalEndTime = Math.Max(TrackMax(SixFretTracks), totalEndTime);
             totalEndTime = Math.Max(TrackMax(DrumsTracks), totalEndTime);
             totalEndTime = Math.Max(TrackMax(ProGuitarTracks), totalEndTime);
+
+            totalEndTime = Math.Max(ProKeys.GetEndTime(), totalEndTime);
+
             totalEndTime = Math.Max(VoxMax(VocalsTracks), totalEndTime);
 
             // Global
+
             totalEndTime = Math.Max(Lyrics.GetEndTime(), totalEndTime);
 
             // Deliberately excluded, as they're not major contributors to the chart bounds
@@ -401,13 +373,18 @@ namespace YARG.Core.Chart
             uint totalFirstTick = 0;
 
             // Tracks
+
             totalFirstTick = Math.Min(TrackMin(FiveFretTracks), totalFirstTick);
             totalFirstTick = Math.Min(TrackMin(SixFretTracks), totalFirstTick);
             totalFirstTick = Math.Min(TrackMin(DrumsTracks), totalFirstTick);
             totalFirstTick = Math.Min(TrackMin(ProGuitarTracks), totalFirstTick);
+
+            totalFirstTick = Math.Min(ProKeys.GetFirstTick(), totalFirstTick);
+
             totalFirstTick = Math.Min(VoxMin(VocalsTracks), totalFirstTick);
 
             // Global
+
             totalFirstTick = Math.Min(Lyrics.GetFirstTick(), totalFirstTick);
 
             // Deliberately excluded, as they're not major contributors to the chart bounds
@@ -429,13 +406,18 @@ namespace YARG.Core.Chart
             uint totalLastTick = 0;
 
             // Tracks
+
             totalLastTick = Math.Max(TrackMax(FiveFretTracks), totalLastTick);
             totalLastTick = Math.Max(TrackMax(SixFretTracks), totalLastTick);
             totalLastTick = Math.Max(TrackMax(DrumsTracks), totalLastTick);
             totalLastTick = Math.Max(TrackMax(ProGuitarTracks), totalLastTick);
+
+            totalLastTick = Math.Max(ProKeys.GetLastTick(), totalLastTick);
+
             totalLastTick = Math.Max(VoxMax(VocalsTracks), totalLastTick);
 
             // Global
+
             totalLastTick = Math.Max(Lyrics.GetLastTick(), totalLastTick);
 
             // Deliberately excluded, as they're not major contributors to the chart bounds

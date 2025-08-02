@@ -1,83 +1,53 @@
 ﻿using System;
-using System.Globalization;
-using System.Text;
 using YARG.Core.Utility;
 
 namespace YARG.Core.Song
 {
-    public readonly struct SortString : IComparable<SortString>, IEquatable<SortString>
+    public readonly struct SortString : IComparable<SortString>
     {
-        // Order of these static variables matters
-        private static readonly (string, string)[] SearchLeniency =
-        {
-            ("Æ", "AE") // Tool - Ænema
-        };
-
         public static readonly SortString Empty = new(string.Empty);
 
-        public readonly string Str;
-        public readonly string SortStr;
-        public readonly int Length;
-        public readonly int HashCode;
+        private readonly string _original;
+        private readonly string _searchStr;
+        private readonly string _sortStr;
+        private readonly CharacterGroup _group;
+        private readonly int _hashcode;
+
+        public string Original => _original;
+        public string SearchStr => _searchStr;
+        public string SortStr => _sortStr;
+        public CharacterGroup Group => _group;
+        public int Length => Original.Length;
+        public char this[int index] => Original[index];
 
         public SortString(string str)
         {
-            Str = RichTextUtils.ReplaceColorNames(str);
-            Length = Str.Length;
-            SortStr = RemoveDiacritics(RichTextUtils.StripRichTextTags(str));
-            HashCode = SortStr.GetHashCode();
-        }
-
-        public int CompareTo(SortString other)
-        {
-            return SortStr.CompareTo(other.SortStr);
+            _original = str;
+            _searchStr = StringTransformations.RemoveUnwantedWhitespace(StringTransformations.RemoveDiacritics(RichTextUtils.StripRichTextTags(str)));
+            _sortStr = StringTransformations.RemoveArticle(_searchStr);
+            _group = StringTransformations.GetCharacterGrouping(_sortStr);
+            _hashcode = _sortStr.GetHashCode();
         }
 
         public override int GetHashCode()
         {
-            return HashCode;
-        }
-
-        public bool Equals(SortString other)
-        {
-            return SortStr.Equals(other.SortStr);
+            return _hashcode;
         }
 
         public override string ToString()
         {
-            return Str;
+            return _original;
         }
 
-        public static implicit operator SortString(string str) => new(str);
-        public static implicit operator string(SortString str) => str.Str;
-
-        public static string RemoveDiacritics(string text)
+        public int CompareTo(SortString other)
         {
-            if (text == null)
+            if (_group != other._group)
             {
-                return string.Empty;
+                return _group - other._group;
             }
-
-            foreach (var c in SearchLeniency)
-            {
-                text = text.Replace(c.Item1, c.Item2);
-            }
-
-            var normalizedString = text.ToLowerInvariant().Normalize(NormalizationForm.FormD);
-            var stringBuilder = new StringBuilder(capacity: normalizedString.Length);
-
-            foreach (char c in normalizedString)
-            {
-                var unicodeCategory = CharUnicodeInfo.GetUnicodeCategory(c);
-                if (unicodeCategory != UnicodeCategory.NonSpacingMark)
-                {
-                    stringBuilder.Append(c);
-                }
-            }
-
-            return stringBuilder
-                .ToString()
-                .Normalize(NormalizationForm.FormC);
+            return string.CompareOrdinal(_sortStr, other._sortStr);
         }
+
+        public static implicit operator string(in SortString str) => str.Original;
     }
 }

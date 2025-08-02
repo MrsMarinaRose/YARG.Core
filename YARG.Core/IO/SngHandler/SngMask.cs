@@ -1,8 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
-using System.Text;
+using System.Runtime.InteropServices;
 
 namespace YARG.Core.IO
 {
@@ -10,58 +9,28 @@ namespace YARG.Core.IO
     /// Handles the buffer of decryption keys, while also providing easy access
     /// to SIMD vector operations through pointers and fixed array behavior.
     /// </summary>
-    public class SngMask : IDisposable
+    [StructLayout(LayoutKind.Sequential, Pack = 32)]
+    public unsafe struct SngMask
     {
-        public const int NUM_KEYBYTES = 256;
-        public const int MASKLENGTH = 16;
-        public static readonly int VECTORBYTE_COUNT = Vector<byte>.Count;
-        public static readonly int NUMVECTORS = NUM_KEYBYTES / VECTORBYTE_COUNT;
+        public const int MASK_SIZE = 256;
+        public static readonly int NUM_VECTORS = MASK_SIZE / sizeof(Vector<byte>);
 
-        private readonly DisposableCounter<FixedArray<byte>> _counter;
-
-        public readonly FixedArray<byte> Keys;
-        public readonly unsafe Vector<byte>* Vectors;
-
-        public SngMask(Stream stream)
+        public fixed byte Ptr[MASK_SIZE];
+        public static SngMask LoadMask(Stream stream)
         {
-            unsafe
+            const int NUM_KEYS = 16;
+            Span<byte> keys = stackalloc byte[NUM_KEYS];
+            if (stream.Read(keys) < keys.Length)
             {
-                byte* mask = stackalloc byte[MASKLENGTH];
-                // Do the read first just incase some error occurs
-                // and we need to exit.
-                stream.Read(new Span<byte>(mask, MASKLENGTH));
-
-                Keys = FixedArray<byte>.Alloc(NUM_KEYBYTES);
-                _counter = DisposableCounter.Wrap(Keys);
-                for (int i = 0; i < NUM_KEYBYTES;)
-                {
-                    for (int j = 0; j < MASKLENGTH; i++, j++)
-                    {
-                        Keys.Ptr[i] = (byte) (mask[j] ^ i);
-                    }
-                }
-                Vectors = (Vector<byte>*) Keys.Ptr;
+                throw new EndOfStreamException("Unable to read SNG mask");
             }
-        }
 
-        public SngMask Clone()
-        {
-            return new SngMask(this);
-        }
-
-        private SngMask(SngMask other)
-        {
-            _counter = other._counter.AddRef();
-            Keys = other.Keys;
-            unsafe
+            var mask = default(SngMask);
+            for (int i = 0; i < MASK_SIZE; ++i)
             {
-                Vectors = other.Vectors;
+                mask.Ptr[i] = (byte) (keys[i % NUM_KEYS] ^ i);
             }
-        }
-
-        public void Dispose()
-        {
-            _counter.Dispose();
+            return mask;
         }
     }
 }

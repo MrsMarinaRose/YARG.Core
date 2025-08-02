@@ -52,12 +52,17 @@ namespace MoonscraperChartEditor.Song.IO
         {
             public MoonSong song;
             public MoonSong.MoonInstrument instrument;
+
+            public MoonSong.Difficulty? trackDifficulty;
+
             public ParseSettings settings;
             public TimedMidiEvent timedEvent;
+
             public Dictionary<int, EventProcessFn> noteProcessMap;
             public Dictionary<int, EventProcessFn> phraseProcessMap;
             public Dictionary<string, ProcessModificationProcessFn> textProcessMap;
             public Dictionary<PhaseShiftSysEx.PhraseCode, EventProcessFn> sysexProcessMap;
+
             public List<EventProcessFn> forcingProcessList;
             public List<EventProcessFn> sysexProcessList;
             public IReadOnlyList<EventProcessFn> postProcessList;
@@ -65,19 +70,19 @@ namespace MoonscraperChartEditor.Song.IO
 
         public static MoonSong ReadMidi(string path)
         {
-            var settings = ParseSettings.Default;
+            var settings = ParseSettings.Default_Midi;
             return ReadMidi(ref settings, path);
         }
 
         public static MoonSong ReadMidi(Stream stream)
         {
-            var settings = ParseSettings.Default;
+            var settings = ParseSettings.Default_Midi;
             return ReadMidi(ref settings, stream);
         }
 
         public static MoonSong ReadMidi(MidiFile midi)
         {
-            var settings = ParseSettings.Default;
+            var settings = ParseSettings.Default_Midi;
             return ReadMidi(ref settings, midi);
         }
 
@@ -99,13 +104,23 @@ namespace MoonscraperChartEditor.Song.IO
             if (midi.TimeDivision is not TicksPerQuarterNoteTimeDivision ticks)
                 throw new InvalidOperationException("MIDI file has no beat resolution set!");
 
-            var song = new MoonSong()
-            {
-                resolution = ticks.TicksPerQuarterNote
-            };
+            var song = new MoonSong((uint)ticks.TicksPerQuarterNote);
 
             // Apply settings
-            ValidateAndApplySettings(song, ref settings);
+            song.hopoThreshold = settings.HopoThreshold > ParseSettings.SETTING_DEFAULT
+                // +1 for a small bit of leniency
+                ? (uint)settings.HopoThreshold + 1
+                : (song.resolution / 3) + 1;
+
+            if (settings.SustainCutoffThreshold <= ParseSettings.SETTING_DEFAULT)
+            {
+                settings.SustainCutoffThreshold = (song.resolution / 3) + 1;
+            }
+            else if (settings.SustainCutoffThreshold == 0)
+            {
+                // Limit minimum cutoff to 1 tick, non - sustain notes created by charting programs are 1 tick
+                settings.SustainCutoffThreshold = 1;
+            }
 
             // Read all bpm data in first. This will also allow song.TimeToTick to function properly.
             ReadSync(midi.GetTempoMap(), song);
@@ -131,6 +146,19 @@ namespace MoonscraperChartEditor.Song.IO
 
                     case MidIOHelper.VENUE_TRACK:
                         ReadVenueEvents(track, song);
+                        break;
+
+                    case MidIOHelper.PRO_KEYS_EXPERT:
+                        ReadNotes(ref settings, track, song, MoonSong.MoonInstrument.ProKeys, MoonSong.Difficulty.Expert);
+                        break;
+                    case MidIOHelper.PRO_KEYS_HARD:
+                        ReadNotes(ref settings, track, song, MoonSong.MoonInstrument.ProKeys, MoonSong.Difficulty.Hard);
+                        break;
+                    case MidIOHelper.PRO_KEYS_MEDIUM:
+                        ReadNotes(ref settings, track, song, MoonSong.MoonInstrument.ProKeys, MoonSong.Difficulty.Medium);
+                        break;
+                    case MidIOHelper.PRO_KEYS_EASY:
+                        ReadNotes(ref settings, track, song, MoonSong.MoonInstrument.ProKeys, MoonSong.Difficulty.Easy);
                         break;
 
                     case MidIOHelper.VOCALS_TRACK:
@@ -168,43 +196,26 @@ namespace MoonscraperChartEditor.Song.IO
             return song;
         }
 
-        private static void ValidateAndApplySettings(MoonSong song, ref ParseSettings settings)
-        {
-            // Apply HOPO threshold settings
-            song.hopoThreshold = MidIOHelper.GetHopoThreshold(settings, song.resolution);
-
-            // Verify sustain cutoff threshold
-            if (settings.SustainCutoffThreshold < 0)
-            {
-                // Default to 1/12th step + 1
-                settings.SustainCutoffThreshold = (long) (song.resolution / 3) + 1;
-            }
-            else
-            {
-                // Limit minimum cutoff to 1 tick, non-sustain notes created by charting programs are 1 tick
-                settings.SustainCutoffThreshold = Math.Max(settings.SustainCutoffThreshold, 1);
-            }
-
-            // SP note is not verified, as it being set is checked for by SP fixups
-            // Note snap threshold is also not verified, as the parser doesn't use it
-
-            // Enable chord HOPO cancellation
-            settings.ChordHopoCancellation = true;
-        }
-
         private static void ReadSync(TempoMap tempoMap, MoonSong song)
         {
             YargLogger.LogTrace("Reading sync track");
 
             foreach (var tempo in tempoMap.GetTempoChanges())
             {
-                song.bpms.Add(new MoonTempo((uint) tempo.Time, (float) tempo.Value.BeatsPerMinute));
+                uint tempoTick = (uint) tempo.Time;
+                song.Add(new TempoChange((float) tempo.Value.BeatsPerMinute,
+                    // This is valid since we are guaranteed to have at least one tempo event at all times
+                    song.TickToTime(tempoTick, song.syncTrack.Tempos[^1]), tempoTick));
             }
+
+            var tempoTracker = new ChartEventTickTracker<TempoChange>(song.syncTrack.Tempos);
             foreach (var timesig in tempoMap.GetTimeSignatureChanges())
             {
-                song.timeSignatures.Add(new MoonTimeSignature((uint) timesig.Time, (uint) timesig.Value.Numerator, (uint) timesig.Value.Denominator));
+                uint tsTick = (uint) timesig.Time;
+                tempoTracker.Update(tsTick);
+                song.Add(new TimeSignatureChange((uint) timesig.Value.Numerator, (uint) timesig.Value.Denominator,
+                    song.TickToTime(tsTick, tempoTracker.Current!), tsTick));
             }
-            song.UpdateBPMTimeValues();
         }
 
         private static void ReadSongBeats(TrackChunk track, MoonSong song)
@@ -221,20 +232,23 @@ namespace MoonscraperChartEditor.Song.IO
 
                 if (trackEvent is NoteEvent note && note.EventType == MidiEventType.NoteOn)
                 {
-                    MoonBeat.Type beatType;
+                    BeatlineType beatType;
                     switch ((byte)note.NoteNumber)
                     {
+                        case MidIOHelper.BEAT_MEASURE:
+                            beatType = BeatlineType.Measure;
+                            break;
                         case MidIOHelper.BEAT_STRONG:
-                            beatType = MoonBeat.Type.Measure;
+                            beatType = BeatlineType.Strong;
                             break;
                         case MidIOHelper.BEAT_WEAK:
-                            beatType = MoonBeat.Type.Beat;
+                            beatType = BeatlineType.Weak;
                             break;
                         default:
                             continue;
                     }
 
-                    song.beats.Add(new MoonBeat((uint)absoluteTime, beatType));
+                    song.Add(new Beatline(beatType, song.TickToTime((uint) absoluteTime), (uint)absoluteTime));
                 }
             }
         }
@@ -317,7 +331,7 @@ namespace MoonscraperChartEditor.Song.IO
                     {
                         // Check for duplicates
                         if (TryFindMatchingNote(unpairedNoteQueue, note, out _, out _, out _))
-                            YargLogger.LogTrace($"Found duplicate note on at tick {absoluteTime}!");
+                            YargLogger.LogFormatWarning("Found duplicate note on at tick {0}!", absoluteTime);
                         else
                             unpairedNoteQueue.Add((note, absoluteTime));
                     }
@@ -326,7 +340,7 @@ namespace MoonscraperChartEditor.Song.IO
                         // Find starting note
                         if (!TryFindMatchingNote(unpairedNoteQueue, note, out var noteStart, out long startTick, out int startIndex))
                         {
-                            YargLogger.LogTrace($"Found note off with no corresponding note on at tick {absoluteTime}!");
+                            YargLogger.LogFormatWarning("Found note off with no corresponding note on at tick {0}!", absoluteTime);
                             return;
                         }
                         unpairedNoteQueue.RemoveAt(startIndex);
@@ -379,11 +393,14 @@ namespace MoonscraperChartEditor.Song.IO
         }
 
         private static void ReadNotes(ref ParseSettings settings, TrackChunk track, MoonSong song,
-            MoonSong.MoonInstrument instrument)
+            MoonSong.MoonInstrument instrument, MoonSong.Difficulty? trackDifficulty = null)
         {
             if (track == null || track.Events.Count < 1)
             {
-                YargLogger.LogTrace("Attempted to load an empty track!");
+                if (trackDifficulty is {} difficulty)
+                    YargLogger.LogFormatTrace("Skipping empty track for {0} {1}", difficulty, instrument);
+                else
+                    YargLogger.LogFormatTrace("Skipping empty track for instrument {0}", instrument);
                 return;
             }
 
@@ -396,6 +413,7 @@ namespace MoonscraperChartEditor.Song.IO
             {
                 song = song,
                 instrument = instrument,
+                trackDifficulty = trackDifficulty,
                 settings = settings,
                 noteProcessMap = GetNoteProcessDict(gameMode),
                 phraseProcessMap = GetPhraseProcessDict(settings.StarPowerNote, gameMode),
@@ -456,8 +474,18 @@ namespace MoonscraperChartEditor.Song.IO
                 process(ref processParams);
             }
 
-            foreach (var difficulty in EnumExtensions<MoonSong.Difficulty>.Values)
-                song.GetChart(instrument, difficulty).notes.TrimExcess();
+            // If this specific track does not have a difficulty assigned to it, clear all difficulties
+            if (trackDifficulty is null)
+            {
+                foreach (var difficulty in EnumExtensions<MoonSong.Difficulty>.Values)
+                {
+                    song.GetChart(instrument, difficulty).notes.TrimExcess();
+                }
+            }
+            else
+            {
+                song.GetChart(instrument, trackDifficulty.Value).notes.TrimExcess();
+            }
 
             settings = processParams.settings;
         }
@@ -469,7 +497,7 @@ namespace MoonscraperChartEditor.Song.IO
             {
                 // Check for duplicates
                 if (TryFindMatchingNote(unpairedNotes, note, out _, out _, out _))
-                    YargLogger.LogTrace($"Found duplicate note on at tick {absoluteTick}!");
+                    YargLogger.LogFormatWarning("Found duplicate note on at tick {0}!", absoluteTick);
                 else
                     unpairedNotes.Add((note, absoluteTick));
             }
@@ -477,7 +505,7 @@ namespace MoonscraperChartEditor.Song.IO
             {
                 if (!TryFindMatchingNote(unpairedNotes, note, out var noteStart, out long startTick, out int startIndex))
                 {
-                    YargLogger.LogTrace($"Found note off with no corresponding note on at tick {absoluteTick}!");
+                    YargLogger.LogFormatWarning("Found note off with no corresponding note on at tick {0}!", absoluteTick);
                     return;
                 }
                 unpairedNotes.RemoveAt(startIndex);
@@ -499,17 +527,14 @@ namespace MoonscraperChartEditor.Song.IO
             uint tick = (uint)absoluteTick;
 
             string eventText = TextEvents.NormalizeTextEvent(text.Text, out bool strippedBrackets).ToString();
-            if (strippedBrackets)
+            if (processParams.textProcessMap.TryGetValue(eventText, out var processFn))
             {
-                if (processParams.textProcessMap.TryGetValue(eventText, out var processFn))
-                {
-                    // This text event affects parsing of the .mid file, run its function and don't parse it into the chart
-                    processFn(ref processParams);
-                    return;
-                }
+                // This text event affects parsing of the .mid file, run its function and don't parse it into the chart
+                processFn(ref processParams);
+                return;
             }
             // No brackets to strip off, on vocals this is most likely a lyric event
-            else if (MoonSong.InstrumentToChartGameMode(processParams.instrument) is MoonChart.GameMode.Vocals)
+            else if (!strippedBrackets && MoonSong.InstrumentToChartGameMode(processParams.instrument) is MoonChart.GameMode.Vocals)
             {
                 eventText = TextEvents.LYRIC_PREFIX_WITH_SPACE + eventText;
             }
@@ -527,13 +552,15 @@ namespace MoonscraperChartEditor.Song.IO
             if (!PhaseShiftSysEx.TryParse(sysex, out var psEvent))
             {
                 // SysEx event is not a Phase Shift SysEx event
-                YargLogger.LogTrace($"Encountered unknown SysEx event at tick {absoluteTick}: {sysex.Data.ToHexString()}");
+                YargLogger.LogFormatWarning("Encountered unknown SysEx event at tick {0}: {1}",
+                    absoluteTick, new HexBytesFormat(sysex.Data));
                 return;
             }
 
             if (psEvent.type != PhaseShiftSysEx.Type.Phrase)
             {
-                YargLogger.LogTrace($"Encountered unknown Phase Shift SysEx event type {psEvent.type} at tick {absoluteTick}!");
+                YargLogger.LogFormatWarning("Encountered unknown Phase Shift SysEx event type {0} at tick {1}!",
+                    psEvent.type, absoluteTick);
                 return;
             }
 
@@ -541,7 +568,7 @@ namespace MoonscraperChartEditor.Song.IO
             {
                 // Check for duplicates
                 if (TryFindMatchingSysEx(unpairedSysex, psEvent, out _, out _, out _))
-                    YargLogger.LogTrace($"Found duplicate SysEx start event at tick {absoluteTick}!");
+                    YargLogger.LogFormatWarning("Found duplicate SysEx start event at tick {0}!", absoluteTick);
                 else
                     unpairedSysex.Add((psEvent, absoluteTick));
             }
@@ -549,7 +576,7 @@ namespace MoonscraperChartEditor.Song.IO
             {
                 if (!TryFindMatchingSysEx(unpairedSysex, psEvent, out var sysexStart, out long startTick, out int startIndex))
                 {
-                    YargLogger.LogTrace($"Found PS SysEx end with no corresponding start at tick {absoluteTick}!");
+                    YargLogger.LogFormatWarning("Found PS SysEx end with no corresponding start at tick {0}!", absoluteTick);
                     return;
                 }
                 unpairedSysex.RemoveAt(startIndex);
@@ -638,7 +665,8 @@ namespace MoonscraperChartEditor.Song.IO
             MoonObjectHelper.OrderedInsertFromBack(newMoonNote, chart.notes);
         }
 
-        private static void ProcessNoteOnEventAsSpecialPhrase(ref EventProcessParams eventProcessParams, MoonPhrase.Type type)
+        private static void ProcessNoteOnEventAsSpecialPhrase(ref EventProcessParams eventProcessParams,
+            MoonPhrase.Type type, MoonSong.Difficulty? difficulty = null)
         {
             var song = eventProcessParams.song;
             var instrument = eventProcessParams.instrument;
@@ -647,9 +675,18 @@ namespace MoonscraperChartEditor.Song.IO
             uint tick = (uint)timedEvent.startTick;
             uint sus = (uint)timedEvent.length;
 
-            foreach (var diff in EnumExtensions<MoonSong.Difficulty>.Values)
+            if (difficulty is null)
             {
-                MoonObjectHelper.OrderedInsertFromBack(new MoonPhrase(tick, sus, type), song.GetChart(instrument, diff).specialPhrases);
+                foreach (var diff in EnumExtensions<MoonSong.Difficulty>.Values)
+                {
+                    MoonObjectHelper.OrderedInsertFromBack(new MoonPhrase(tick, sus, type),
+                        song.GetChart(instrument, diff).specialPhrases);
+                }
+            }
+            else
+            {
+                MoonObjectHelper.OrderedInsertFromBack(new MoonPhrase(tick, sus, type),
+                    song.GetChart(instrument, difficulty.Value).specialPhrases);
             }
         }
 
@@ -720,17 +757,8 @@ namespace MoonscraperChartEditor.Song.IO
                         break;
 
                     case MoonNote.MoonNoteType.Tap:
-                        if (!note.IsOpenNote(gameMode))
-                        {
-                            note.flags |= MoonNote.Flags.Tap;
-                            note.flags &= ~MoonNote.Flags.Forced;
-                        }
-                        else
-                        {
-                            // Open notes cannot become taps, mark them as HOPOs instead
-                            newType = MoonNote.MoonNoteType.Hopo;
-                            goto case MoonNote.MoonNoteType.Hopo;
-                        }
+                        note.flags |= MoonNote.Flags.Tap;
+                        note.flags &= ~MoonNote.Flags.Forced;
                         break;
 
                     default:
@@ -738,8 +766,7 @@ namespace MoonscraperChartEditor.Song.IO
                         continue;
                 }
 
-                double time = song.TickToTime(note.tick);
-                var finalType = note.GetGuitarNoteType(gameMode, song.hopoThreshold);
+                var finalType = note.GetGuitarNoteType(song.hopoThreshold);
                 YargLogger.Assert(finalType == newType);
             }
         }

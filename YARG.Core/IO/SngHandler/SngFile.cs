@@ -1,180 +1,253 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using YARG.Core.Extensions;
 using YARG.Core.IO.Ini;
-using YARG.Core.Logging;
 
 namespace YARG.Core.IO
 {
-    /// <summary>
-    /// <see href="https://github.com/mdsitton/SngFileFormat">Documentation of SNG file type</see>
-    /// </summary>
-    public class SngFile : IDisposable, IEnumerable<KeyValuePair<string, SngFileListing>>
+    public struct SngFileListing
     {
-        public readonly AbridgedFileInfo Info;
-        public readonly uint Version;
-        public readonly SngMask Mask;
-        public readonly IniSection Metadata;
+        public long Position;
+        public long Length;
+    }
 
-        private readonly Dictionary<string, SngFileListing> _listings;
-        private readonly int[]? _values;
+    public class SngTracker : IDisposable
+    {
+        private int _count = 1;
 
-        private SngFile(AbridgedFileInfo info, FileStream stream)
+        public Stream Stream = null!;
+        public SngMask Mask;
+
+        public SngTracker AddOwner()
         {
-            Info = info;
-            Version = stream.Read<uint>(Endianness.Little);
-            Mask = new SngMask(stream);
-            Metadata = ReadMetadata(stream);
-            _listings = ReadListings(stream);
-
-            if (stream is YARGSongFileStream yargSongStream)
-                _values = yargSongStream.Values;
-        }
-
-        public SngFileListing this[string key] => _listings[key];
-        public bool ContainsKey(string key) => _listings.ContainsKey(key);
-        public bool TryGetValue(string key, out SngFileListing listing) => _listings.TryGetValue(key, out listing);
-
-        public FileStream LoadFileStream()
-        {
-            if (_values != null)
+            lock (this)
             {
-                return new YARGSongFileStream(Info.FullName, _values);
+                if (_count == 0)
+                {
+                    throw new ObjectDisposedException(nameof(SngTracker));
+                }
+                ++_count;
             }
-            return new FileStream(Info.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, 1);
-        }
-
-        IEnumerator<KeyValuePair<string, SngFileListing>> IEnumerable<KeyValuePair<string, SngFileListing>>.GetEnumerator()
-        {
-            return _listings.GetEnumerator();
-        }
-
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            return _listings.GetEnumerator();
+            return this;
         }
 
         public void Dispose()
         {
-            Mask.Dispose();
-        }
-
-
-        private const int BYTES_64BIT = 8;
-        private const int BYTES_32BIT = 4;
-        private const int BYTES_24BIT = 3;
-        private const int BYTES_16BIT = 2;
-        private static readonly byte[] SNGPKG = { (byte)'S', (byte) 'N', (byte) 'G', (byte)'P', (byte)'K', (byte)'G' };
-
-        public static SngFile? TryLoadFromFile(AbridgedFileInfo file)
-        {
-            using var stream = InitStream_Internal(file.FullName);
-            if (stream == null)
+            lock (this)
             {
-                return null;
-            }
-
-            try
-            {
-                return new SngFile(file, stream);
-            }
-            catch (Exception ex)
-            {
-                YargLogger.LogException(ex, $"Error loading {file.FullName}.");
-                return null;
-            }
-        }
-
-        private static FileStream? InitStream_Internal(string filename)
-        {
-            try
-            {
-                var filestream = File.OpenRead(filename);
-                using var wrapper = DisposableCounter.Wrap(filestream);
-
-                var yargSongStream = YARGSongFileStream.TryLoad(filestream);
-                if (yargSongStream != null)
+                if (_count == 0)
                 {
-                    yargSongStream.Seek(SNGPKG.Length, SeekOrigin.Current);
-                    return yargSongStream;
+                    throw new ObjectDisposedException(nameof(SngTracker));
                 }
 
+                if (--_count == 0)
+                {
+                    Stream?.Dispose();
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// <see href="https://github.com/mdsitton/SngFileFormat">Documentation of SNG file type</see>
+    /// </summary>
+    public struct SngFile : IDisposable
+    {
+        private SngTracker _tracker;
+
+        public uint Version { get; private set; }
+
+        public IniModifierCollection Modifiers { get; private set; }
+
+        public Dictionary<string, SngFileListing> Listings { get; private set; }
+
+        public readonly bool IsLoaded => _tracker != null;
+
+        public readonly bool TryGetListing(string name, out SngFileListing listing)
+        {
+            return Listings.TryGetValue(name, out listing);
+        }
+
+        public readonly FixedArray<byte> LoadAllBytes(in SngFileListing listing)
+        {
+            FixedArray<byte> data;
+            lock (_tracker.Stream)
+            {
+                _tracker.Stream.Position = listing.Position;
+                data = FixedArray.Read(_tracker.Stream, listing.Length, true);
+            }
+
+            unsafe
+            {
+                SngFileStream.DecryptVectorized(data.Ptr, _tracker.Mask, data.Ptr + listing.Length);
+            }
+            return data;
+        }
+
+        public readonly SngFileStream CreateStream(string name, in SngFileListing listing)
+        {
+            return new SngFileStream(name, in listing, _tracker);
+        }
+
+        public readonly void Dispose()
+        {
+            _tracker.Dispose();
+        }
+
+        private static readonly byte[] SNGPKG = { (byte) 'S', (byte) 'N', (byte) 'G', (byte) 'P', (byte) 'K', (byte) 'G' };
+        public static SngFile TryLoadFromFile(string filename, bool loadMetadata)
+        {
+            using var tracker = new SngTracker();
+            var filestream = new FileStream(filename, FileMode.Open, FileAccess.Read, FileShare.Read, 1);
+            if (YARGSongFileStream.TryLoad(filestream, out var yargStream))
+            {
+                yargStream.Position = SNGPKG.Length;
+                tracker.Stream = yargStream;
+            }
+            else
+            {
                 filestream.Position = 0;
                 Span<byte> tag = stackalloc byte[SNGPKG.Length];
-                if (filestream.Read(tag) != tag.Length || !tag.SequenceEqual(SNGPKG))
+                if (filestream.Read(tag) < tag.Length || !tag.SequenceEqual(SNGPKG))
                 {
-                    return null;
+                    return default;
                 }
-                return wrapper.Release();
+                tracker.Stream = filestream;
             }
-            catch (Exception ex)
+
+            SngFile sng = new()
             {
-                YargLogger.LogException(ex, $"Error loading {filename}");
-                return null;
+                Version = tracker.Stream.Read<uint>(Endianness.Little)
+            };
+
+            tracker.Mask = SngMask.LoadMask(tracker.Stream);
+            if (loadMetadata)
+            {
+                sng.Modifiers = new IniModifierCollection();
+                LoadMetadata(sng.Modifiers, tracker.Stream);
+            }
+            else
+            {
+                long length = tracker.Stream.Read<long>(Endianness.Little);
+                tracker.Stream.Position += length;
+            }
+
+            sng.Listings = new Dictionary<string, SngFileListing>();
+            LoadListings(sng.Listings, tracker.Stream);
+            // Allow the SngFile instance to own the tracker after the `using` call
+            sng._tracker = tracker.AddOwner();
+            return sng;
+        }
+
+        public static bool ValidateMatch(string filename, uint versionToMatch)
+        {
+            using var filestream = new FileStream(filename, FileMode.Open, FileAccess.Read, FileShare.Read, 1);
+            Stream basestream;
+            if (YARGSongFileStream.TryLoad(filestream, out var yargStream))
+            {
+                yargStream.Position = SNGPKG.Length;
+                basestream = yargStream;
+            }
+            else
+            {
+                filestream.Position = 0;
+                Span<byte> tag = stackalloc byte[SNGPKG.Length];
+                if (filestream.Read(tag) < tag.Length || !tag.SequenceEqual(SNGPKG))
+                {
+                    return false;
+                }
+                basestream = filestream;
+            }
+
+            using (basestream)
+            {
+                return basestream.Read<uint>(Endianness.Little) == versionToMatch;
             }
         }
 
-        private static IniSection ReadMetadata(Stream stream)
+        private static void LoadMetadata(IniModifierCollection modifiers, Stream stream)
         {
-            Dictionary<string, List<IniModifier>> modifiers = new();
-            ulong length = stream.Read<ulong>(Endianness.Little) - sizeof(ulong);
+            long length = stream.Read<long>(Endianness.Little) - sizeof(ulong);
             ulong numPairs = stream.Read<ulong>(Endianness.Little);
 
-            var validNodes = SongIniHandler.SONG_INI_DICTIONARY["[song]"];
-            var text = new YARGTextContainer<byte>(stream.ReadBytes((int)length), 0);
-            for (ulong i = 0; i < numPairs; i++)
-            {
-                int strLength = GetLength(text);
-                var key = Encoding.UTF8.GetString(text.Data, text.Position, strLength);
-                text.Position += strLength;
+            using var bytes = FixedArray.Read(stream, length);
+            var container = new YARGTextContainer<byte>(bytes, null!);
 
-                strLength = GetLength(text);
-                var next = text.Position + strLength;
-                if (validNodes.TryGetValue(key, out var node))
+            for (ulong i = 0; i < numPairs; ++i)
+            {
+                int strLength = GetLength(ref container);
+                string key;
+                unsafe
                 {
-                    var mod = node.CreateSngModifier(text, strLength);
-                    if (modifiers.TryGetValue(node.outputName, out var list))
-                    {
-                        list.Add(mod);
-                    }
-                    else
-                    {
-                        modifiers.Add(node.outputName, new() { mod });
-                    }
+                    key = Encoding.UTF8.GetString(container.PositionPointer, strLength);
                 }
-                text.Position = next;
+                container.Position += strLength;
+
+                strLength = GetLength(ref container);
+
+                int next = container.Position + strLength;
+                if (SongIniHandler.SONG_INI_OUTLINES.TryGetValue(key, out var outline))
+                {
+                    modifiers.AddSng(ref container, strLength, outline);
+                }
+                container.Position = next;
             }
-            return new IniSection(modifiers);
         }
 
-        private static Dictionary<string, SngFileListing> ReadListings(Stream stream)
+        private static void LoadListings(Dictionary<string, SngFileListing> listings, Stream stream)
         {
-            ulong length = stream.Read<ulong>(Endianness.Little) - sizeof(ulong);
+            long length = stream.Read<long>(Endianness.Little) - sizeof(ulong);
             ulong numListings = stream.Read<ulong>(Endianness.Little);
 
-            Dictionary<string, SngFileListing> listings = new((int)numListings);
+            using var bytes = FixedArray.Read(stream, length);
+            listings.EnsureCapacity((int)numListings);
 
-            var reader = BinaryReaderExtensions.Load(stream, (int)length);
-            for (ulong i = 0; i < numListings; i++)
+            ulong listingIndex = 0;
+            int buffPosition = 0;
+            while (listingIndex < numListings)
             {
-                var strLen = reader.ReadByte();
-                string filename = Encoding.UTF8.GetString(reader.ReadBytes(strLen));
-                int idx = filename.LastIndexOf('/');
-                if (idx != -1)
+                if (buffPosition == bytes.Length)
                 {
-                    filename = filename[idx..];
+                    throw new EndOfStreamException();
                 }
-                listings.Add(filename.ToLower(), new SngFileListing(filename, reader));
+
+                int strlen = bytes[buffPosition++];
+                if (buffPosition + strlen + 2 * sizeof(long) > bytes.Length)
+                {
+                    throw new EndOfStreamException();
+                }
+
+                string filename;
+                SngFileListing listing;
+                unsafe
+                {
+                    filename = Encoding.UTF8.GetString(bytes.Ptr + buffPosition, strlen);
+                    buffPosition += strlen;
+                    listing.Length = *(long*)&bytes.Ptr[buffPosition];
+                    buffPosition += sizeof(long);
+                    listing.Position = *(long*) &bytes.Ptr[buffPosition];
+                    buffPosition += sizeof(long);
+                }
+                listings.Add(filename.ToLower(), listing);
+                ++listingIndex;
             }
-            return listings;
         }
 
-        private static int GetLength(YARGTextContainer<byte> container)
+        private static int GetLength(ref YARGTextContainer<byte> container)
         {
-            int length = BitConverter.ToInt32(container.Data, container.Position);
+            if (container.Position + sizeof(int) > container.Length)
+            {
+                throw new EndOfStreamException();
+            }
+
+            int length;
+            unsafe
+            {
+                length = *(int*) container.PositionPointer;
+            }
+
             container.Position += sizeof(int);
             if (container.Position + length > container.Length)
             {
