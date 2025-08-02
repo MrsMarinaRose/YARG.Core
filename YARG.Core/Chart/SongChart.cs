@@ -457,7 +457,7 @@ namespace YARG.Core.Chart
                     break;
 
                 var text = GlobalEvents[index];
-                if (text.Text == TextEvents.END_MARKER)
+                if (text.Text == Parsing.TextEvents.END_MARKER)
                     return text;
             }
 
