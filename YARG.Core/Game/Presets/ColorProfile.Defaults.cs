@@ -44,6 +44,7 @@ namespace YARG.Core.Game
         #region Six Fret Colors
         private static readonly Color WhiteNotes  = Color.FromArgb(0xFF, 0x2B, 0x36, 0x3D); // #2b363dff
         private static readonly Color BlackNotes  = Color.FromArgb(0xFF, 0xCA, 0xCA, 0xCA); // #cacacaff
+        private static readonly Color Invisibility= Color.FromArgb(0x00, 0xCA, 0xCA, 0xCA); // #cacaca00
         #endregion
 
         public static ColorProfile Default = new("Default", true);

@@ -11,12 +11,12 @@ namespace YARG.Core.Game
         {
             #region Frets
             // here for completeness, technically GHL does not show frets on the highway
-            public Color OpenFret = DefaultPurple;
-            public Color GreenFret  = DefaultGreen;
-            public Color RedFret    = DefaultRed;
-            public Color YellowFret = DefaultYellow;
-            public Color BlueFret   = DefaultBlue;
-            public Color OrangeFret = DefaultOrange;
+            public Color OpenFret = Invisibility;
+            public Color GreenFret  = Invisibility;
+            public Color RedFret    = Invisibility;
+            public Color YellowFret = Invisibility;
+            public Color BlueFret   = Invisibility;
+            public Color OrangeFret = Invisibility;
 
             /// <summary>
             /// Gets the fret color for a specific note index.
@@ -36,12 +36,12 @@ namespace YARG.Core.Game
                 };
             }
 
-            public Color OpenFretInner   = DefaultPurple;
-            public Color GreenFretInner  = DefaultGreen;
-            public Color RedFretInner    = DefaultRed;
-            public Color YellowFretInner = DefaultYellow;
-            public Color BlueFretInner   = DefaultBlue;
-            public Color OrangeFretInner = DefaultOrange;
+            public Color OpenFretInner   = Invisibility;
+            public Color GreenFretInner  = Invisibility;
+            public Color RedFretInner    = Invisibility;
+            public Color YellowFretInner = Invisibility;
+            public Color BlueFretInner   = Invisibility;
+            public Color OrangeFretInner = Invisibility;
 
             /// <summary>
             /// Gets the inner fret color for a specific note index.
