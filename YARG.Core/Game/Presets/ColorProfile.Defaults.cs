@@ -41,6 +41,11 @@ namespace YARG.Core.Game
 
         #endregion
 
+        #region Six Fret Colors
+        private static readonly Color WhiteNotes  = Color.FromArgb(0xFF, 0x2B, 0x36, 0x3D); // #2b363dff
+        private static readonly Color BlackNotes  = Color.FromArgb(0xFF, 0xCA, 0xCA, 0xCA); // #cacacaff
+        #endregion
+
         public static ColorProfile Default = new("Default", true);
 
         public static ColorProfile CircularDefault = new("Circular", true)
@@ -77,105 +82,116 @@ namespace YARG.Core.Game
             }
         };
 
+        public static ColorProfile GHLDefault = new("Angled (Six Fret)", true)
+        {
+            SixFretGuitar = new SixFretGuitarColors
+            {
+                WhiteNote = WhiteNotes,
+                BlackNote = BlackNotes,
+                LightParticles = WhiteNotes,
+                DarkParticles = BlackNotes
+            }
+        };
+
         public static ColorProfile AprilFoolsDefault = new("YARG on Fire", true)
         {
             FiveFretGuitar = new FiveFretGuitarColors
             {
-                OpenFret   = CircularOrange,
-                GreenFret  = AprilFoolsGreen,
-                RedFret    = AprilFoolsRed,
+                OpenFret = CircularOrange,
+                GreenFret = AprilFoolsGreen,
+                RedFret = AprilFoolsRed,
                 YellowFret = AprilFoolsYellow,
-                BlueFret   = AprilFoolsBlue,
+                BlueFret = AprilFoolsBlue,
                 OrangeFret = AprilFoolsPurple,
 
-                OpenFretInner   = CircularOrange,
-                GreenFretInner  = AprilFoolsGreen,
-                RedFretInner    = AprilFoolsRed,
+                OpenFretInner = CircularOrange,
+                GreenFretInner = AprilFoolsGreen,
+                RedFretInner = AprilFoolsRed,
                 YellowFretInner = AprilFoolsYellow,
-                BlueFretInner   = AprilFoolsBlue,
+                BlueFretInner = AprilFoolsBlue,
                 OrangeFretInner = AprilFoolsPurple,
 
-                OpenNote   = CircularOrange,
-                GreenNote  = AprilFoolsGreen,
-                RedNote    = AprilFoolsRed,
+                OpenNote = CircularOrange,
+                GreenNote = AprilFoolsGreen,
+                RedNote = AprilFoolsRed,
                 YellowNote = AprilFoolsYellow,
-                BlueNote   = AprilFoolsBlue,
+                BlueNote = AprilFoolsBlue,
                 OrangeNote = AprilFoolsPurple,
 
-                OpenNoteStarPower   = CircularStarpower,
-                GreenNoteStarPower  = CircularStarpower,
-                RedNoteStarPower    = CircularStarpower,
+                OpenNoteStarPower = CircularStarpower,
+                GreenNoteStarPower = CircularStarpower,
+                RedNoteStarPower = CircularStarpower,
                 YellowNoteStarPower = CircularStarpower,
-                BlueNoteStarPower   = CircularStarpower,
+                BlueNoteStarPower = CircularStarpower,
                 OrangeNoteStarPower = CircularStarpower,
             },
             FourLaneDrums = new FourLaneDrumsColors
             {
-                KickFret   = AprilFoolsPurple,
-                RedFret    = AprilFoolsRed,
+                KickFret = AprilFoolsPurple,
+                RedFret = AprilFoolsRed,
                 YellowFret = AprilFoolsYellow,
-                BlueFret   = AprilFoolsBlue,
-                GreenFret  = AprilFoolsGreen,
+                BlueFret = AprilFoolsBlue,
+                GreenFret = AprilFoolsGreen,
 
-                KickFretInner   = AprilFoolsPurple,
-                RedFretInner    = AprilFoolsRed,
+                KickFretInner = AprilFoolsPurple,
+                RedFretInner = AprilFoolsRed,
                 YellowFretInner = AprilFoolsYellow,
-                BlueFretInner   = AprilFoolsBlue,
-                GreenFretInner  = AprilFoolsGreen,
+                BlueFretInner = AprilFoolsBlue,
+                GreenFretInner = AprilFoolsGreen,
 
                 KickNote = AprilFoolsPurple,
 
-                RedDrum    = AprilFoolsRed,
+                RedDrum = AprilFoolsRed,
                 YellowDrum = AprilFoolsYellow,
-                BlueDrum   = AprilFoolsBlue,
-                GreenDrum  = AprilFoolsGreen,
+                BlueDrum = AprilFoolsBlue,
+                GreenDrum = AprilFoolsGreen,
 
-                RedCymbal    = AprilFoolsRed,
+                RedCymbal = AprilFoolsRed,
                 YellowCymbal = AprilFoolsYellow,
-                BlueCymbal   = AprilFoolsBlue,
-                GreenCymbal  = AprilFoolsGreen,
+                BlueCymbal = AprilFoolsBlue,
+                GreenCymbal = AprilFoolsGreen,
 
                 KickStarpower = CircularStarpower,
 
-                RedDrumStarpower    = CircularStarpower,
+                RedDrumStarpower = CircularStarpower,
                 YellowDrumStarpower = CircularStarpower,
-                BlueDrumStarpower   = CircularStarpower,
-                GreenDrumStarpower  = CircularStarpower,
+                BlueDrumStarpower = CircularStarpower,
+                GreenDrumStarpower = CircularStarpower,
 
-                RedCymbalStarpower    = CircularStarpower,
+                RedCymbalStarpower = CircularStarpower,
                 YellowCymbalStarpower = CircularStarpower,
-                BlueCymbalStarpower   = CircularStarpower,
-                GreenCymbalStarpower  = CircularStarpower,
+                BlueCymbalStarpower = CircularStarpower,
+                GreenCymbalStarpower = CircularStarpower,
             },
             FiveLaneDrums = new FiveLaneDrumsColors
             {
-                KickFret   = CircularOrange,
-                RedFret    = AprilFoolsRed,
+                KickFret = CircularOrange,
+                RedFret = AprilFoolsRed,
                 YellowFret = AprilFoolsYellow,
-                BlueFret   = AprilFoolsBlue,
+                BlueFret = AprilFoolsBlue,
                 OrangeFret = AprilFoolsPurple,
-                GreenFret  = AprilFoolsGreen,
+                GreenFret = AprilFoolsGreen,
 
-                KickFretInner   = CircularOrange,
-                RedFretInner    = AprilFoolsRed,
+                KickFretInner = CircularOrange,
+                RedFretInner = AprilFoolsRed,
                 YellowFretInner = AprilFoolsYellow,
-                BlueFretInner   = AprilFoolsBlue,
+                BlueFretInner = AprilFoolsBlue,
                 OrangeFretInner = AprilFoolsPurple,
-                GreenFretInner  = AprilFoolsGreen,
+                GreenFretInner = AprilFoolsGreen,
 
-                KickNote   = CircularOrange,
-                RedNote    = AprilFoolsRed,
+                KickNote = CircularOrange,
+                RedNote = AprilFoolsRed,
                 YellowNote = AprilFoolsYellow,
-                BlueNote   = AprilFoolsBlue,
+                BlueNote = AprilFoolsBlue,
                 OrangeNote = AprilFoolsPurple,
-                GreenNote  = AprilFoolsGreen,
+                GreenNote = AprilFoolsGreen,
 
-                KickStarpower   = CircularStarpower,
-                RedStarpower    = CircularStarpower,
+                KickStarpower = CircularStarpower,
+                RedStarpower = CircularStarpower,
                 YellowStarpower = CircularStarpower,
-                BlueStarpower   = CircularStarpower,
+                BlueStarpower = CircularStarpower,
                 OrangeStarpower = CircularStarpower,
-                GreenStarpower  = CircularStarpower,
+                GreenStarpower = CircularStarpower,
             }
         };
 
@@ -183,7 +199,8 @@ namespace YARG.Core.Game
         {
             Default,
             CircularDefault,
-            AprilFoolsDefault
+            AprilFoolsDefault,
+            GHLDefault
         };
     }
 }
