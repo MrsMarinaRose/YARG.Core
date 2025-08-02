@@ -1,79 +1,53 @@
 ﻿using System.IO;
-using YARG.Core.Extensions;
-using YARG.Core.IO;
 
 namespace YARG.Core.Engine.Vocals
 {
     public class VocalsEngineParameters : BaseEngineParameters
     {
         /// <summary>
-        /// The total size of the pitch window. If the player sings outside of it, no hit
-        /// percent is awarded.
+        /// The percent of ticks that have to be correct in a phrase for it to count as a hit.
         /// </summary>
-        public readonly float PitchWindow;
+        public double PhraseHitPercent { get; private set; }
 
         /// <summary>
-        /// The total size of the pitch window that awards full points. If the player sings
-        /// outside of it while in the normal pitch window, the amount of fill percent
-        /// awarded will decrease gradually.
+        /// How often the vocals give a pitch reading (approximately).
         /// </summary>
-        public readonly float PitchWindowPerfect;
-
-        /// <summary>
-        /// The percent of ticks that have to be correct in a phrase for it to count for full points.
-        /// </summary>
-        public readonly double PhraseHitPercent;
-
-        /// <summary>
-        /// How often the vocals give a pitch reading (approximately). This is used to determine
-        /// the leniency for hit ticks.
-        /// </summary>
-        public readonly double ApproximateVocalFps;
+        public double ApproximateVocalFps { get; private set; }
 
         /// <summary>
         /// Whether or not the player can sing to activate starpower.
         /// </summary>
-        public readonly bool SingToActivateStarPower;
+        public bool SingToActivateStarPower { get; private set; }
 
-        /// <summary>
-        /// Base score awarded per complete vocal phrase.
-        /// </summary>
-        public readonly int PointsPerPhrase;
+        public VocalsEngineParameters()
+        {
+        }
 
         public VocalsEngineParameters(HitWindowSettings hitWindow, int maxMultiplier, float[] starMultiplierThresholds,
-            float pitchWindow, float pitchWindowPerfect, double phraseHitPercent, double approximateVocalFps,
-            bool singToActivateStarPower, int pointsPerPhrase)
-            : base(hitWindow, maxMultiplier, 0, 0, starMultiplierThresholds)
+            double phraseHitPercent, bool singToActivateStarPower, double approximateVocalFps)
+            : base(hitWindow, maxMultiplier, starMultiplierThresholds)
         {
-            PitchWindow = pitchWindow;
-            PitchWindowPerfect = pitchWindowPerfect;
             PhraseHitPercent = phraseHitPercent;
             ApproximateVocalFps = approximateVocalFps;
             SingToActivateStarPower = singToActivateStarPower;
-            PointsPerPhrase = pointsPerPhrase;
-        }
-
-        public VocalsEngineParameters(ref FixedArrayStream stream, int version)
-            : base(ref stream, version)
-        {
-            PitchWindow = stream.Read<float>(Endianness.Little);
-            PitchWindowPerfect = stream.Read<float>(Endianness.Little);
-            PhraseHitPercent = stream.Read<double>(Endianness.Little);
-            ApproximateVocalFps = stream.Read<double>(Endianness.Little);
-            SingToActivateStarPower = stream.ReadBoolean();
-            PointsPerPhrase = stream.Read<int>(Endianness.Little);
         }
 
         public override void Serialize(BinaryWriter writer)
         {
             base.Serialize(writer);
 
-            writer.Write(PitchWindow);
-            writer.Write(PitchWindowPerfect);
             writer.Write(PhraseHitPercent);
             writer.Write(ApproximateVocalFps);
             writer.Write(SingToActivateStarPower);
-            writer.Write(PointsPerPhrase);
+        }
+
+        public override void Deserialize(BinaryReader reader, int version = 0)
+        {
+            base.Deserialize(reader, version);
+
+            PhraseHitPercent = reader.ReadDouble();
+            ApproximateVocalFps = reader.ReadDouble();
+            SingToActivateStarPower = reader.ReadBoolean();
         }
     }
 }

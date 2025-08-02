@@ -29,10 +29,7 @@ namespace YARG.Core.Logging
         {
             _logBuilder = ZString.CreateStringBuilder();
 
-            var logOutputterThread = new Thread(LogOutputter)
-            {
-                Name = "YargLogger Thread",
-            };
+            var logOutputterThread = new Thread(LogOutputter);
             logOutputterThread.Start();
         }
 
@@ -69,16 +66,30 @@ namespace YARG.Core.Logging
         public static void KillLogger()
         {
             _isLoggingEnabled = false;
-            FlushLogQueue();
 
-            // Dispose of all listeners
-            lock (Listeners)
+            lock (LogQueue)
             {
-                foreach (var listener in Listeners)
+                while (LogQueue.TryDequeue(out var item))
                 {
-                    listener.Dispose();
+                    using (item)
+                    {
+                        // Send it to all listeners that are currently registered
+                        lock (Listeners)
+                        {
+                            foreach (var listener in Listeners)
+                            {
+                                _logBuilder.Clear();
+                                listener.FormatLogItem(ref _logBuilder, item);
+                                listener.WriteLogItem(ref _logBuilder, item);
+                            }
+                        }
+                    }
                 }
-                Listeners.Clear();
+            }
+
+            foreach(var listener in Listeners)
+            {
+                listener.Dispose();
             }
         }
 
@@ -88,66 +99,26 @@ namespace YARG.Core.Logging
             // In the event logging is disabled, we still want to process all remaining log items
             while (_isLoggingEnabled || LogQueue.Count > 0)
             {
-                FlushLogQueue();
-
-                // Sleep for a short time. Logs will process at most every LOG_INTERVAL milliseconds
-                Thread.Sleep(LOG_INTERVAL);
-            }
-        }
-
-        private static void FlushLogQueue()
-        {
-            lock (LogQueue)
-            {
-                lock (Listeners)
+                // Lock the queue and process all items
+                lock (LogQueue)
                 {
                     while (LogQueue.TryDequeue(out var item))
                     {
                         using (item)
                         {
-                            WriteLogItemToListeners(item);
+                            // Send it to all listeners that are currently registered
+                            foreach (var listener in Listeners)
+                            {
+                                _logBuilder.Clear();
+                                listener.FormatLogItem(ref _logBuilder, item);
+                                listener.WriteLogItem(ref _logBuilder, item);
+                            }
                         }
                     }
                 }
-            }
-        }
 
-        private static void WriteLogItemToListeners(LogItem item)
-        {
-            // Send it to all listeners that are currently registered
-            foreach (var listener in Listeners)
-            {
-                try
-                {
-                    _logBuilder.Clear();
-                    listener.FormatLogItem(ref _logBuilder, item);
-                    listener.WriteLogItem(ref _logBuilder, item);
-                }
-                catch (Exception e)
-                {
-                    // In the event formatting the log fails, print an error message with the exception
-                    try
-                    {
-                        using var exceptionLog = FormatLogItem.MakeItem(
-                            "Failed to format the log on this line! Refer to the exception below.\n{0}", e);
-                        exceptionLog.Level = LogLevel.Error;
-
-                        // Make sure to pass down the source information so the position
-                        // of the original log is known.
-                        exceptionLog.Source = item.Source;
-                        exceptionLog.Method = item.Method;
-                        exceptionLog.Line = item.Line;
-                        exceptionLog.Time = item.Time;
-
-                        _logBuilder.Clear();
-                        listener.FormatLogItem(ref _logBuilder, exceptionLog);
-                        listener.WriteLogItem(ref _logBuilder, exceptionLog);
-                    }
-                    catch
-                    {
-                        // If that fails too, just skip this log
-                    }
-                }
+                // Sleep for a short time. Logs will process at most every LOG_INTERVAL milliseconds
+                Thread.Sleep(LOG_INTERVAL);
             }
         }
 
@@ -167,7 +138,7 @@ namespace YARG.Core.Logging
             item.Time = DateTime.Now;
 
             // Lock while enqueuing. This prevents the log outputter from processing the queue while we're adding to it
-            lock (LogQueue)
+            lock(LogQueue)
             {
                 LogQueue.Enqueue(item);
             }

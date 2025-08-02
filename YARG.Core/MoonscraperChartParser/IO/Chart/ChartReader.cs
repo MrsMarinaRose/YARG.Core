@@ -15,10 +15,16 @@ using YARG.Core.Utility;
 
 namespace MoonscraperChartEditor.Song.IO
 {
-    using AsciiTrimSplitter = SpanSplitter<char, AsciiTrimSplitProcessor>;
+    using TrimSplitter = SpanSplitter<char, TrimSplitProcessor>;
 
     internal static partial class ChartReader
     {
+        private struct Anchor
+        {
+            public uint   tick;
+            public double anchorTime;
+        }
+
         private struct NoteFlag
         {
             public uint           tick;
@@ -78,13 +84,13 @@ namespace MoonscraperChartEditor.Song.IO
 
         public static MoonSong ReadFromFile(string filepath)
         {
-            var settings = ParseSettings.Default_Chart;
+            var settings = ParseSettings.Default;
             return ReadFromFile(ref settings, filepath);
         }
 
         public static MoonSong ReadFromText(ReadOnlySpan<char> chartText)
         {
-            var settings = ParseSettings.Default_Chart;
+            var settings = ParseSettings.Default;
             return ReadFromText(ref settings, chartText);
         }
 
@@ -107,168 +113,53 @@ namespace MoonscraperChartEditor.Song.IO
             }
         }
 
-        private const uint DEFAULT_RESOLUTION = 192;
         public static MoonSong ReadFromText(ref ParseSettings settings, ReadOnlySpan<char> chartText)
         {
-            int textIndex = 0;
+            var song = new MoonSong();
 
-            static void ExpectSection(ReadOnlySpan<char> chartText, ref int textIndex,
-                string name, out AsciiTrimSplitter sectionBody)
+            while (!chartText.IsEmpty)
             {
-                if (!GetNextSection(chartText, ref textIndex, out var sectionName, out sectionBody))
-                    throw new InvalidDataException($"Required section [{name}] is missing!");
+                // Find section name
+                int nameIndex = chartText.IndexOf('[');
+                int nameEndIndex = chartText.IndexOf(']');
+                if (nameIndex < 0 || nameEndIndex < 0 || nameEndIndex < nameIndex) break;
 
-                if (!sectionName.Equals(name, StringComparison.Ordinal))
-                    throw new InvalidDataException($"Invalid section ordering! Expected [{name}], found [{sectionName.ToString()}]");
-            }
+                nameIndex++; // Exclude starting bracket
+                var sectionName = chartText[nameIndex..nameEndIndex];
+                chartText = chartText[nameEndIndex..];
 
-            // Check for the [Song] section first explicitly, need the Resolution property up-front
-            ExpectSection(chartText, ref textIndex, ChartIOHelper.SECTION_SONG, out var sectionBody);
-            var song = SubmitDataSong(sectionBody);
+                // Find section body
+                int sectionIndex = chartText.IndexOf('{');
+                int sectionEndIndex = chartText.IndexOf('}');
+                if (sectionIndex < 0 || sectionEndIndex < 0 || sectionEndIndex < sectionIndex) break;
 
-            // With a 192 resolution, .chart has a HOPO threshold of 65 ticks, not 64,
-            // so we need to scale this factor to different resolutions (480 res = 162.5 threshold)
-            // This extra tick is meant for some slight leniency; .mid has it too, but it's applied
-            // after factoring in the resolution there, not before.
-            const uint THRESHOLD_AT_DEFAULT = 65;
-            song.hopoThreshold = settings.HopoThreshold > ParseSettings.SETTING_DEFAULT
-                ? (uint) settings.HopoThreshold
-                : (song.resolution * THRESHOLD_AT_DEFAULT) / DEFAULT_RESOLUTION;
+                sectionIndex++; // Exclude starting bracket
+                var sectionText = chartText[sectionIndex..sectionEndIndex];
+                chartText = chartText[sectionEndIndex..];
 
-            // Check for [SyncTrack] next, we need it for time conversions
-            ExpectSection(chartText, ref textIndex, ChartIOHelper.SECTION_SYNC_TRACK, out sectionBody);
-            SubmitDataSync(song, sectionBody);
-
-            // Parse instrument tracks
-            while (GetNextSection(chartText, ref textIndex, out var sectionName, out sectionBody))
-            {
-                SubmitChartData(ref settings, song, sectionName, sectionBody);
+                var splitter = sectionText.SplitTrimmed('\n');
+                SubmitChartData(ref settings, song, sectionName, splitter);
             }
 
             return song;
         }
 
-        private static bool GetNextSection(ReadOnlySpan<char> chartText, ref int index,
-            out ReadOnlySpan<char> sectionName, out AsciiTrimSplitter sectionBody)
-        {
-            static int GetLineCount(ReadOnlySpan<char> chartText, int startIndex, int relativeIndex)
-            {
-                var searchSpace = chartText[..(startIndex + relativeIndex)];
-
-                int count = 0;
-                int index;
-                while ((index = searchSpace.IndexOf('\n')) >= 0)
-                {
-                    count++;
-                    searchSpace = searchSpace[++index..];
-                }
-
-                return count;
-            }
-
-            sectionName = default;
-            sectionBody = default;
-            if (index >= chartText.Length)
-                // No more sections present
-                return false;
-
-            var search = chartText[index..];
-
-            int nameStartIndex;
-            while (true)
-            {
-                nameStartIndex = search.IndexOf('[');
-                if (nameStartIndex < 0)
-                {
-                    // No more sections present
-                    return false;
-                }
-
-                int test = nameStartIndex++;
-                while (test > 0)
-                {
-                    --test;
-                    if (search[test] > 32 || search[test] == '\n')
-                    {
-                        break;
-                    }
-                }
-
-                index += nameStartIndex;
-
-                var curr = search[test];
-                search = search[nameStartIndex..];
-                if (test == 0 || curr == '\n')
-                {
-                    break;
-                }
-            }
-
-            int nameEndIndex = search.IndexOf(']');
-            if (nameEndIndex < 0)
-            {
-                int startLine = GetLineCount(chartText, index, nameStartIndex);
-                throw new Exception($"Missing end bracket for section name on line {startLine}!");
-            }
-
-            sectionName = search[..nameEndIndex++];
-            search = search[nameEndIndex..];
-            index += nameEndIndex;
-
-            if (sectionName.IndexOfAny('\r', '\n') >= 0)
-            {
-                int startLine = GetLineCount(chartText, index, nameStartIndex);
-                throw new Exception($"Section name on {startLine} spans across multiple lines!");
-            }
-
-            // Find section body
-            int sectionStartIndex = search.IndexOf('{');
-            if (sectionStartIndex < 0)
-            {
-                int startLine = GetLineCount(chartText, index, nameStartIndex);
-                throw new Exception($"Missing section body for section [{sectionName.ToString()}]! (starting on line {startLine})");
-            }
-            ++sectionStartIndex;
-            search = search[sectionStartIndex..];
-            index += sectionStartIndex;
-
-            int sectionEndIndex = 0;
-            while (true)
-            {
-                int sectionEndOffset = search[sectionEndIndex..].IndexOf('}');
-                if (sectionEndOffset < 0)
-                {
-                    int startLine = GetLineCount(chartText, index + sectionEndIndex, nameStartIndex);
-                    throw new Exception($"Missing body end bracket for section [{sectionName.ToString()}]! (starting on line {startLine})");
-                }
-
-                int test = sectionEndIndex + sectionEndOffset;
-                while (test > sectionEndIndex)
-                {
-                    --test;
-                    if (search[test] > 32 || search[test] == '\n')
-                    {
-                        break;
-                    }
-                }
-
-                sectionEndIndex += sectionEndOffset;
-                if (test == 0 || search[test] == '\n')
-                {
-                    break;
-                }
-                ++sectionEndIndex;
-            }
-
-            sectionBody = search[..sectionEndIndex].SplitTrimmedAscii('\n');
-            index += sectionEndIndex + 1;
-            return true;
-        }
-
         private static void SubmitChartData(ref ParseSettings settings, MoonSong song, ReadOnlySpan<char> sectionName,
-            AsciiTrimSplitter sectionLines)
+            TrimSplitter sectionLines)
         {
-            if (sectionName.Equals(ChartIOHelper.SECTION_EVENTS, StringComparison.Ordinal))
+            if (sectionName.Equals(ChartIOHelper.SECTION_SONG, StringComparison.Ordinal))
+            {
+                YargLogger.LogTrace("Loading chart properties");
+                SubmitDataSong(song, ref settings, sectionLines);
+                return;
+            }
+            else if (sectionName.Equals(ChartIOHelper.SECTION_SYNC_TRACK, StringComparison.Ordinal))
+            {
+                YargLogger.LogTrace("Loading sync data");
+                SubmitDataSync(song, sectionLines);
+                return;
+            }
+            else if (sectionName.Equals(ChartIOHelper.SECTION_EVENTS, StringComparison.Ordinal))
             {
                 YargLogger.LogTrace("Loading events data");
                 SubmitDataGlobals(song, sectionLines);
@@ -293,29 +184,30 @@ namespace MoonscraperChartEditor.Song.IO
             }
         }
 
-        private static MoonSong SubmitDataSong(AsciiTrimSplitter sectionLines)
+        private static void SubmitDataSong(MoonSong song, ref ParseSettings settings, TrimSplitter sectionLines)
         {
-            uint resolution = DEFAULT_RESOLUTION;
-            foreach (var line in sectionLines)
-            {
-                var key = line.SplitOnceTrimmed('=', out var value);
-                value = value.Trim('"'); // Strip off any quotation marks
-
-                if (key.Equals("Resolution", StringComparison.Ordinal))
-                {
-                    resolution = (uint)FastInt32Parse(value);
-                    break;
-                }
-            }
-            return new MoonSong(resolution);
+            ChartMetadata.ParseSongSection(song, sectionLines);
+            ValidateAndApplySettings(song, ref settings);
         }
 
-        private static void SubmitDataSync(MoonSong song, AsciiTrimSplitter sectionLines)
+        private static void ValidateAndApplySettings(MoonSong song, ref ParseSettings settings)
         {
+            // Apply HOPO threshold settings
+            song.hopoThreshold = ChartIOHelper.GetHopoThreshold(in settings, song.resolution);
+
+            // Sustain cutoff threshold is not verified, sustains are not cut off by default in .chart
+            // SP note is not verified, as it is only relevant for .mid
+            // Note snap threshold is not verified, as the parser doesn't use it
+
+            // Chord HOPO cancellation does not apply in .chart
+            settings.ChordHopoCancellation = false;
+        }
+
+        private static void SubmitDataSync(MoonSong song, TrimSplitter sectionLines)
+        {
+            var anchorData = new List<Anchor>();
             uint prevTick = 0;
 
-            // This is valid since we are guaranteed to have at least one tempo event at all times
-            var tempoTracker = new ChartEventTickTracker<TempoChange>(song.syncTrack.Tempos);
             foreach (var _line in sectionLines)
             {
                 var line = _line.Trim();
@@ -332,37 +224,53 @@ namespace MoonscraperChartEditor.Song.IO
                     if (prevTick > tick) throw new Exception("Tick value not in ascending order");
                     prevTick = tick;
 
-                    tempoTracker.Update(tick);
-
                     // Get event type
-                    var typeCode = remaining.GetNextWord(out remaining);
-                    if (typeCode.Equals("B", StringComparison.Ordinal))
+                    var typeCodeText = remaining.GetNextWord(out remaining);
+                    char typeCode = typeCodeText[0];
+                    switch (typeCode)
                     {
-                        // Get tempo value
-                        var tempoText = remaining.GetNextWord(out remaining);
-                        uint tempo = (uint) FastInt32Parse(tempoText);
+                        case 'T' when typeCodeText[1] == 'S':
+                        {
+                            // Get numerator
+                            var numeratorText = remaining.GetNextWord(out remaining);
+                            uint numerator = (uint) FastInt32Parse(numeratorText);
 
-                        song.Add(new TempoChange(tempo / 1000f, song.TickToTime(tick, tempoTracker.Current!), tick));
-                    }
-                    else if (typeCode.Equals("TS", StringComparison.Ordinal))
-                    {
-                        // Get numerator
-                        var numeratorText = remaining.GetNextWord(out remaining);
-                        uint numerator = (uint) FastInt32Parse(numeratorText);
+                            // Get denominator
+                            var denominatorText = remaining.GetNextWord(out remaining);
+                            uint denominator = denominatorText.IsEmpty ? 2 : (uint) FastInt32Parse(denominatorText);
+                            song.timeSignatures.Add(new MoonTimeSignature(tick, numerator,
+                                (uint) Math.Pow(2, denominator)));
+                            break;
+                        }
 
-                        // Get denominator
-                        var denominatorText = remaining.GetNextWord(out remaining);
-                        uint denominator = denominatorText.IsEmpty ? 2 : (uint) FastInt32Parse(denominatorText);
-                        song.Add(new TimeSignatureChange(numerator, (uint) Math.Pow(2, denominator),
-                            song.TickToTime(tick, tempoTracker.Current!), tick));
-                    }
-                    else if (typeCode.Equals("A", StringComparison.Ordinal))
-                    {
-                        // Ignored for now, we don't need anchors
-                    }
-                    else
-                    {
-                        YargLogger.LogFormatWarning("Unrecognized type code '{0}'!", typeCode.ToString());
+                        case 'B':
+                        {
+                            // Get tempo value
+                            var tempoText = remaining.GetNextWord(out remaining);
+                            uint tempo = (uint) FastInt32Parse(tempoText);
+
+                            song.bpms.Add(new MoonTempo(tick, tempo / 1000f));
+                            break;
+                        }
+
+                        case 'A':
+                        {
+                            // Get anchor time
+                            var anchorText = remaining.GetNextWord(out remaining);
+                            ulong anchorTime = FastUint64Parse(anchorText);
+
+                            var anchor = new Anchor()
+                            {
+                                tick = tick,
+                                anchorTime = anchorTime / 1000000.0
+                            };
+                            anchorData.Add(anchor);
+                            break;
+                        }
+
+                        default:
+                            YargLogger.LogFormatWarning("Unrecognized type code '{0}'!", typeCode);
+                            break;
                     }
                 }
                 catch (Exception e)
@@ -370,9 +278,25 @@ namespace MoonscraperChartEditor.Song.IO
                     YargLogger.LogException(e, $"Error parsing .chart line '{line.ToString()}'!");
                 }
             }
+
+            foreach (var anchor in anchorData)
+            {
+                int arrayPos = MoonObjectHelper.FindClosestPosition(anchor.tick, song.bpms);
+                if (song.bpms[arrayPos].tick == anchor.tick)
+                    song.bpms[arrayPos].anchor = anchor.anchorTime;
+                // Create a new anchored bpm
+                else if (anchor.tick < song.bpms[arrayPos].tick)
+                    song.bpms.Insert(arrayPos,
+                        new MoonTempo(anchor.tick, song.bpms[arrayPos - 1].value, anchor.anchorTime));
+                else
+                    song.bpms.Insert(arrayPos + 1,
+                        new MoonTempo(anchor.tick, song.bpms[arrayPos].value, anchor.anchorTime));
+            }
+
+            song.UpdateBPMTimeValues();
         }
 
-        private static void SubmitDataGlobals(MoonSong song, AsciiTrimSplitter sectionLines)
+        private static void SubmitDataGlobals(MoonSong song, TrimSplitter sectionLines)
         {
             uint prevTick = 0;
             foreach (var _line in sectionLines)
@@ -396,7 +320,7 @@ namespace MoonscraperChartEditor.Song.IO
                     if (typeCodeText[0] == 'E')
                     {
                         // Get event text
-                        var eventText = TextEvents.NormalizeTextEvent(remaining.TrimOnce('"').Trim());
+                        var eventText = TextEvents.NormalizeTextEvent(remaining.TrimOnce('"'));
 
                         // Check for section events
                         if (TextEvents.TryParseSectionEvent(eventText, out var sectionName))
@@ -424,7 +348,7 @@ namespace MoonscraperChartEditor.Song.IO
 
         #endregion
 
-        private static void LoadChart(ref ParseSettings settings, MoonSong song, AsciiTrimSplitter sectionLines,
+        private static void LoadChart(ref ParseSettings settings, MoonSong song, TrimSplitter sectionLines,
             MoonSong.MoonInstrument instrument, MoonSong.Difficulty difficulty)
         {
             var chart = song.GetChart(instrument, difficulty);

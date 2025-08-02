@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Runtime.CompilerServices;
 using YARG.Core.Extensions;
+using YARG.Core.Utility;
 
 namespace YARG.Core.IO
 {
@@ -13,44 +14,38 @@ namespace YARG.Core.IO
     /// These are read and written in big-endian, so that the characters used are
     /// human-readable in a hex editor, for example.
     /// </remarks>
-    public readonly struct FourCC
+    public readonly struct FourCC : IBinarySerializable
     {
         private readonly uint _code;
 
-        public FourCC(char a, char b, char c, char d)
+        private FourCC(uint code)
         {
-            _code = ((uint)(byte) d << 24) | ((uint)(byte) c << 16) | ((uint)(byte) b << 8) | a;
+            _code = code;
+        }
+
+        public FourCC(char a, char b, char c, char d)
+            : this((byte) a, (byte) b, (byte) c, (byte) d) {}
+
+        public FourCC(byte a, byte b, byte c, byte d)
+        {
+            _code = ((uint) a << 24) | ((uint) b << 16) | ((uint) c << 8) | d;
         }
 
         public FourCC(ReadOnlySpan<byte> data)
         {
-            _code = BinaryPrimitives.ReadUInt32LittleEndian(data);
+            _code = BinaryPrimitives.ReadUInt32BigEndian(data);
         }
 
-        public FourCC(Stream stream)
-        {
-            _code = stream.Read<uint>(Endianness.Little);
-        }
+        public static FourCC Read(Stream stream) => new(stream.Read<uint>(Endianness.Big));
 
         public void Serialize(BinaryWriter writer)
         {
-            writer.BaseStream.Write(_code, Endianness.Little);
+            writer.BaseStream.Write(_code, Endianness.Big);
         }
 
-        public bool Matches(Stream stream)
-        {
-            return stream.Read<uint>(Endianness.Little) == _code;
-        }
-
-        public bool Matches(ref FixedArrayStream stream)
-        {
-            return stream.Read<uint>(Endianness.Little) == _code;
-        }
-
-        public bool Matches(ReadOnlySpan<byte> data)
-        {
-            return BinaryPrimitives.ReadUInt32LittleEndian(data) == _code;
-        }
+        [Obsolete("FourCC is a readonly struct, use the Read static method instead.", true)]
+        public void Deserialize(BinaryReader reader, int version = 0)
+            => throw new InvalidOperationException("FourCC is a readonly struct, use the Read static method instead.");
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator ==(FourCC left, FourCC right) => left._code == right._code;
@@ -64,10 +59,10 @@ namespace YARG.Core.IO
 
         public override string ToString()
         {
-            char d = (char) ((_code >> 24) & 0xFF);
-            char c = (char) ((_code >> 16) & 0xFF);
-            char b = (char) ((_code >> 8) & 0xFF);
-            char a = (char) (_code & 0xFF);
+            char a = (char) ((_code >> 24) & 0xFF);
+            char b = (char) ((_code >> 16) & 0xFF);
+            char c = (char) ((_code >> 8) & 0xFF);
+            char d = (char) (_code & 0xFF);
             return $"{a}{b}{c}{d}";
         }
     }
@@ -79,45 +74,39 @@ namespace YARG.Core.IO
     /// These are read and written in big-endian, so that the characters used are
     /// human-readable in a hex editor, for example.
     /// </remarks>
-    public readonly struct EightCC
+    public readonly struct EightCC : IBinarySerializable
     {
         private readonly ulong _code;
 
-        public EightCC(char a, char b, char c, char d, char e, char f, char g, char h)
+        private EightCC(ulong code)
         {
-            _code = ((ulong) (byte) h << 56) | ((ulong) (byte) g << 48) | ((ulong) (byte) f << 40) | ((ulong) (byte) e << 32) |
-                    ((ulong) (byte) d << 24) | ((ulong) (byte) c << 16) | ((ulong) (byte) b << 8)  | a;
+            _code = code;
+        }
+
+        public EightCC(char a, char b, char c, char d, char e, char f, char g, char h)
+            : this((byte) a, (byte) b, (byte) c, (byte) d, (byte) e, (byte) f, (byte) g, (byte) h) {}
+
+        public EightCC(byte a, byte b, byte c, byte d, byte e, byte f, byte g, byte h)
+        {
+            _code = ((ulong) a << 56) | ((ulong) b << 48) | ((ulong) c << 40) | ((ulong) d << 32) |
+                ((ulong) e << 24) | ((ulong) f << 16) | ((ulong) g << 8) | h;
         }
 
         public EightCC(ReadOnlySpan<byte> data)
         {
-            _code = BinaryPrimitives.ReadUInt64LittleEndian(data);
+            _code = BinaryPrimitives.ReadUInt64BigEndian(data);
         }
 
-        public EightCC(Stream stream)
-        {
-            _code = stream.Read<ulong>(Endianness.Little);
-        }
+        public static EightCC Read(Stream stream) => new(stream.Read<ulong>(Endianness.Big));
 
         public void Serialize(BinaryWriter writer)
         {
-            writer.BaseStream.Write(_code, Endianness.Little);
+            writer.BaseStream.Write(_code, Endianness.Big);
         }
 
-        public bool Matches(Stream stream)
-        {
-            return stream.Read<ulong>(Endianness.Little) == _code;
-        }
-
-        public bool Matches(ref FixedArrayStream stream)
-        {
-            return stream.Read<ulong>(Endianness.Little) == _code;
-        }
-
-        public bool Matches(ReadOnlySpan<byte> data)
-        {
-            return BinaryPrimitives.ReadUInt64LittleEndian(data) == _code;
-        }
+        [Obsolete("EightCC is a readonly struct, use the Read static method instead.", true)]
+        public void Deserialize(BinaryReader reader, int version = 0)
+            => throw new InvalidOperationException("EightCC is a readonly struct, use the Read static method instead.");
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator ==(EightCC left, EightCC right) => left._code == right._code;
@@ -131,14 +120,14 @@ namespace YARG.Core.IO
 
         public override string ToString()
         {
-            char h = (char) ((_code >> 56) & 0xFF);
-            char g = (char) ((_code >> 48) & 0xFF);
-            char f = (char) ((_code >> 40) & 0xFF);
-            char e = (char) ((_code >> 32) & 0xFF);
-            char d = (char) ((_code >> 24) & 0xFF);
-            char c = (char) ((_code >> 16) & 0xFF);
-            char b = (char) ((_code >> 8) & 0xFF);
-            char a = (char) (_code & 0xFF);
+            char a = (char) ((_code >> 56) & 0xFF);
+            char b = (char) ((_code >> 48) & 0xFF);
+            char c = (char) ((_code >> 40) & 0xFF);
+            char d = (char) ((_code >> 32) & 0xFF);
+            char e = (char) ((_code >> 24) & 0xFF);
+            char f = (char) ((_code >> 16) & 0xFF);
+            char g = (char) ((_code >> 8) & 0xFF);
+            char h = (char) (_code & 0xFF);
             return $"{a}{b}{c}{d}{e}{f}{g}{h}";
         }
     }

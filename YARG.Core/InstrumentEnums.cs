@@ -20,7 +20,7 @@ namespace YARG.Core
         // 5-9: Drums
         FourLaneDrums = 5,
         FiveLaneDrums = 6,
-        // EliteDrums = 7,
+        // TrueDrums = 7,
 
         // 10-14: Pro instruments
         ProGuitar = 10,
@@ -55,8 +55,10 @@ namespace YARG.Core
         // 20-29: Drums
         FourLaneDrums = 20,
         ProDrums = 21,
+
         FiveLaneDrums = 22,
-        EliteDrums = 23,
+
+        // TrueDrums = 23,
 
         // 30-39: Pro instruments
         ProGuitar_17Fret = 30,
@@ -131,7 +133,7 @@ namespace YARG.Core
 
                 Instrument.FiveLaneDrums => GameMode.FiveLaneDrums,
 
-                // Instrument.EliteDrums => GameMode.EliteDrums,
+                // Instrument.TrueDrums => GameMode.TrueDrums,
 
                 Instrument.ProGuitar_17Fret or
                 Instrument.ProGuitar_22Fret or
@@ -178,10 +180,10 @@ namespace YARG.Core
                 {
                     Instrument.FiveLaneDrums
                 },
-                //GameMode.EliteDrums     => new[]
-                //{
-                //     Instrument.EliteDrums,
-                //},
+                // GameMode.TrueDrums      => new[]
+                // {
+                //     Instrument.TrueDrums,
+                // },
                 GameMode.ProGuitar      => new[]
                 {
                     Instrument.ProGuitar_17Fret,

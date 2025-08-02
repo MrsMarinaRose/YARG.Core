@@ -3,7 +3,7 @@ using System.IO;
 
 namespace YARG.Core.IO
 {
-    public class YARGSongFileStream : Stream
+    public class YARGSongFileStream : FileStream
     {
         private const int HEADER_SIZE = 24;
         private const int SET_LENGTH  = 15;
@@ -14,38 +14,39 @@ namespace YARG.Core.IO
             (byte) 'S', (byte) 'O', (byte) 'N', (byte) 'G'
         };
 
-        private readonly FileStream _stream;
+        public new long Position
+        {
+            get => base.Position - HEADER_SIZE;
+            set
+            {
+                if (value < 0 || Length < value)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(value));
+                }
+                base.Seek(value + HEADER_SIZE, SeekOrigin.Begin);
+            }
+        }
+
+        public override long Length  { get; }
+
         // These are very important values required to properly
         // decrypt the first layer of encryption (Crawford multi-
         // value cipher).
         private readonly int[] _values;
 
-        public override long Position
+        public int[] Values => (int[])_values.Clone();
+
+        public static YARGSongFileStream? TryLoad(FileStream filestream)
         {
-            get => _stream.Position - HEADER_SIZE;
-            set => _stream.Position = value + HEADER_SIZE;
-        }
-
-        public override long Length => _stream.Length - HEADER_SIZE;
-
-        public override bool CanRead => _stream.CanRead;
-
-        public override bool CanSeek => _stream.CanSeek;
-
-        public override bool CanWrite => false;
-
-        public static bool TryLoad(FileStream filestream, out YARGSongFileStream yargStream)
-        {
-            yargStream = null!;
             Span<byte> signature = stackalloc byte[FILE_SIGNATURE.Length];
             if (filestream.Read(signature) != FILE_SIGNATURE.Length)
             {
-                return false;
+                return null;
             }
 
             if (!signature.SequenceEqual(FILE_SIGNATURE))
             {
-                return false;
+                return null;
             }
 
             // Get the Crawford special number
@@ -67,7 +68,6 @@ namespace YARG.Core.IO
             Span<byte> set = stackalloc byte[SET_LENGTH];
             if (filestream.Read(set) != SET_LENGTH)
             {
-                filestream.Close();
                 throw new EndOfStreamException("YARGSong incomplete");
             }
 
@@ -87,23 +87,26 @@ namespace YARG.Core.IO
                     values[3] += j << 2;
                 }
             }
-            yargStream = new YARGSongFileStream(filestream.Name, values);
-            return true;
+            return new YARGSongFileStream(filestream.Name, values);
         }
 
         public YARGSongFileStream(string filename, int[] values)
+            : base(filename, FileMode.Open, FileAccess.Read, FileShare.Read, 1)
         {
             _values = values;
-            _stream = new FileStream(filename, FileMode.Open, FileAccess.Read, FileShare.Read, 1)
-            {
-                Position = HEADER_SIZE
-            };
+            Length = base.Length - HEADER_SIZE;
+            base.Seek(HEADER_SIZE, SeekOrigin.Begin);
+        }
+
+        private static FileStream InitStream_Internal(string filename)
+        {
+            return new FileStream(filename, FileMode.Open, FileAccess.Read, FileShare.Read, 1);
         }
 
         public override int Read(byte[] buffer, int offset, int count)
         {
             int pos = (int) Position;
-            int read = _stream.Read(buffer, offset, count);
+            int read = base.Read(buffer, offset, count);
             var span = new Span<byte>(buffer, offset, read);
 
             unchecked
@@ -128,7 +131,7 @@ namespace YARG.Core.IO
         {
             if (origin != SeekOrigin.Current)
                 offset += HEADER_SIZE;
-            return _stream.Seek(offset, origin) - HEADER_SIZE;
+            return base.Seek(offset, origin) - HEADER_SIZE;
         }
 
         public override void SetLength(long value)
@@ -139,16 +142,6 @@ namespace YARG.Core.IO
         public override void Write(byte[] buffer, int offset, int count)
         {
             throw new InvalidOperationException();
-        }
-
-        public override void Flush()
-        {
-            _stream.Flush();
-        }
-
-        public YARGSongFileStream Clone()
-        {
-            return new YARGSongFileStream(_stream.Name, _values);
         }
     }
 }

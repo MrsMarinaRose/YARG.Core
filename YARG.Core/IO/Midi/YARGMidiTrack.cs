@@ -1,11 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Runtime.CompilerServices;
+using System.Text;
+using YARG.Core.Extensions;
 
 namespace YARG.Core.IO
 {
-    public struct YARGMidiTrack
+    public sealed class YARGMidiTrack
     {
         public static readonly Dictionary<string, MidiTrackType> TRACKNAMES = new()
         {
@@ -21,7 +22,6 @@ namespace YARG.Core.IO
             {"PART GUITAR COOP GHL", MidiTrackType.Coop_6},
             {"PART KEYS",            MidiTrackType.Keys},
             {"PART DRUMS",           MidiTrackType.Drums},
-            {"PART ELITE_DRUMS",     MidiTrackType.EliteDrums},
             {"PART VOCALS",          MidiTrackType.Vocals},
             {"PART HARM1",           MidiTrackType.Harm1},
             {"PART HARM2",           MidiTrackType.Harm2},
@@ -40,114 +40,84 @@ namespace YARG.Core.IO
             {"BEAT",                 MidiTrackType.Beat},
         };
 
-        private struct RunningEvent
+        private struct MidiEvent
         {
-            public static readonly RunningEvent Default = new()
-            {
-                Type = MidiEventType.Reset_Or_Meta,
-                Length = 0
-            };
-
             public MidiEventType Type;
-            public int           Length;
+            public int Channel;
+            public int Length;
         }
 
-        private readonly unsafe byte* _data;
-        private readonly        int   _length;
-        private                 int   _trackPosition;
-        private                 int   _eventPosition;
+        private long _tickPosition;
+        private MidiEvent _event;
+        private MidiEvent _running;
 
-        private long         _tickPosition;
-        private int          _eventLength;
-        private RunningEvent _running;
+        private readonly ReadOnlyMemory<byte> _data;
+        private int _trackPos;
 
-        public readonly unsafe TextSpan ExtractTextOrSysEx()
+        public long Position => _tickPosition;
+        public MidiEventType Type => _event.Type;
+        public int Channel => _event.Channel;
+
+        public YARGMidiTrack(Stream stream)
         {
-            return new TextSpan()
+            int count = stream.Read<int>(Endianness.Big);
+            if (stream is MemoryStream mem)
             {
-                ptr = _data + _eventPosition,
-                length = _eventLength,
-            };
-        }
-
-        public readonly void ExtractMidiNote(ref MidiNote note)
-        {
-            unsafe
-            {
-                note = *(MidiNote*) (_data + _eventPosition);
+                _data = new ReadOnlyMemory<byte>(mem.GetBuffer(), (int) mem.Position, count);
+                mem.Position += count;
             }
-        }
-
-        public unsafe YARGMidiTrack(byte* data, int length)
-        {
-            _data = data;
-            _length = length;
-            _trackPosition = 0;
-            _eventPosition = 0;
-            _tickPosition = 0;
-            _eventLength = 0;
-            _running = RunningEvent.Default;
-        }
-
-        public bool FindTrackName(out TextSpan trackname)
-        {
-            trackname = TextSpan.Empty;
-            var stats = default(MidiStats);
-            while (ParseEvent(ref stats) && _tickPosition == 0)
+            else
             {
-                if (stats.Type == MidiEventType.Text_TrackName)
+                _data = stream.ReadBytes(count);
+            }
+            _event.Type = _running.Type = MidiEventType.Reset_Or_Meta;
+        }
+
+        public string? FindTrackName(Encoding encoding)
+        {
+            string trackname = string.Empty;
+            while (ParseEvent(true) && _tickPosition == 0)
+            {
+                if (_event.Type == MidiEventType.Text_TrackName)
                 {
-                    var ev = ExtractTextOrSysEx();
-                    if (!trackname.IsEmpty && !trackname.SequenceEqual(in ev))
-                    {
-                        return false;
-                    }
+                    string ev = encoding.GetString(ExtractTextOrSysEx());
+                    if (trackname.Length > 0 && trackname != ev)
+                        return null;
                     trackname = ev;
                 }
             }
-
-            _trackPosition = 0;
-            _tickPosition = 0;
-            _running.Type = MidiEventType.Reset_Or_Meta;
-            return true;
+            Reset();
+            return trackname;
         }
 
         private const int CHANNEL_MASK = 0x0F;
         private const int EVENTTYPE_MASK = 0xF0;
 
-        public bool ParseEvent(ref MidiStats stats)
+        public bool ParseEvent(bool parseVLQ)
         {
-            _tickPosition += ReadVLQ();
-            if (_trackPosition == _length)
-            {
-                throw new EndOfStreamException("End of midi track reached after VLQ");
-            }
-            stats.Position = _tickPosition;
+            _trackPos += _event.Length;
+            if (!parseVLQ)
+                AbsorbVLQ();
+            else
+                _tickPosition += ReadVLQ();
 
-            byte tmp;
-            unsafe
-            {
-                tmp = _data[_trackPosition];
-            }
-
-            stats.Type = (MidiEventType) tmp;
-            if (stats.Type < MidiEventType.Note_Off)
+            var span = _data.Span;
+            byte tmp = span[_trackPos];
+            var type = (MidiEventType) tmp;
+            if (type < MidiEventType.Note_Off)
             {
                 if (_running.Type == MidiEventType.Reset_Or_Meta)
-                {
                     throw new Exception("Invalid running event");
-                }
-                stats.Type = _running.Type;
-                _eventLength = _running.Length;
+                _event = _running;
             }
             else
             {
-                ++_trackPosition;
-                if (stats.Type < MidiEventType.SysEx)
+                _trackPos++;
+                if (type < MidiEventType.SysEx)
                 {
-                    stats.Channel = (byte) (tmp & CHANNEL_MASK);
-                    stats.Type   = _running.Type    = (MidiEventType) (tmp & EVENTTYPE_MASK);
-                    _eventLength = _running.Length  = _running.Type switch
+                    _event.Channel = _running.Channel = (byte) (tmp & CHANNEL_MASK);
+                    _event.Type    = _running.Type    = (MidiEventType) (tmp & EVENTTYPE_MASK);
+                    _event.Length  = _running.Length  = _running.Type switch
                     {
                         MidiEventType.Note_On or
                         MidiEventType.Note_Off or
@@ -159,43 +129,54 @@ namespace YARG.Core.IO
                 }
                 else
                 {
-                    switch (stats.Type)
+                    switch (type)
                     {
                         case MidiEventType.Reset_Or_Meta:
-                            if (_trackPosition == _length)
-                            {
-                                throw new EndOfStreamException("End of track reached during meta event parse");
-                            }
-
-                            unsafe
-                            {
-                                stats.Type = (MidiEventType) _data[_trackPosition++];
-                            }
+                            type = (MidiEventType) span[_trackPos++];
                             goto case MidiEventType.SysEx_End;
                         case MidiEventType.SysEx:
                         case MidiEventType.SysEx_End:
-                            _eventLength = (int) ReadVLQ();
+                            _event.Length = (int) ReadVLQ();
                             break;
                         case MidiEventType.Song_Position:
-                            _eventLength = 2;
+                            _event.Length = 2;
                             break;
                         case MidiEventType.Song_Select:
-                            _eventLength = 1;
+                            _event.Length = 1;
                             break;
                         default:
-                            _eventLength = 0;
+                            _event.Length = 0;
                             break;
                     }
+                    if (type == MidiEventType.End_Of_Track)
+                        return false;
+                    _event.Type = type;
                 }
             }
 
-            _eventPosition = _trackPosition;
-            _trackPosition += _eventLength;
-            if (_trackPosition > _length)
-            {
-                throw new EndOfStreamException("Midi event stretches past end of track");
-            }
-            return stats.Type != MidiEventType.End_Of_Track;
+            if (_trackPos + _event.Length > _data.Length)
+                throw new EndOfStreamException();
+            return true;
+        }
+
+        public ReadOnlySpan<byte> ExtractTextOrSysEx()
+        {
+            return _data.Slice(_trackPos, _event.Length).Span;
+        }
+
+        public void ExtractMidiNote(ref MidiNote note)
+        {
+            var span = _data.Span;
+            note.value = span[_trackPos];
+            note.velocity = span[_trackPos + 1];
+        }
+
+        public void Reset()
+        {
+            _trackPos = 0;
+            _tickPosition = 0;
+            _event.Length = 0;
+            _event.Type = _running.Type = MidiEventType.Reset_Or_Meta;
         }
 
         private const uint EXTENDED_VLQ_FLAG = 0x80;
@@ -205,37 +186,42 @@ namespace YARG.Core.IO
         /// <summary>
         /// Represents the minimum value where a VLQ shift would be illegal
         /// </summary>
-        private const uint VLQ_SHIFTLIMIT = VLQ_MASK << (VLQ_SHIFT * MAX_SHIFTCOUNT);
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private const uint VLQ_SHIFTLIMIT = 1 << (VLQ_SHIFT * MAX_SHIFTCOUNT);
         private uint ReadVLQ()
         {
-            uint value = 0;
-            while (true)
+            var span = _data.Span;
+            uint curr = span[_trackPos++];
+            uint value = curr & VLQ_MASK;
+            while (curr >= EXTENDED_VLQ_FLAG)
             {
-                if (_trackPosition >= _length)
+                if (value < VLQ_SHIFTLIMIT)
                 {
-                    throw new EndOfStreamException();
+                    value <<= VLQ_SHIFT;
+                    curr = span[_trackPos++];
+                    value |= curr & VLQ_MASK;
                 }
-
-                uint curr;
-                unsafe
-                {
-                    curr = _data[_trackPosition++];
-                }
-
-                value |= curr & VLQ_MASK;
-                if (curr < EXTENDED_VLQ_FLAG)
-                {
-                    break;
-                }
-
-                if ((value & VLQ_SHIFTLIMIT) > 0)
-                {
+                else
                     throw new Exception("Invalid variable length quantity");
-                }
-                value <<= VLQ_SHIFT;
             }
             return value;
+        }
+
+        private unsafe void AbsorbVLQ()
+        {
+            var span = _data.Span;
+            uint b = span[_trackPos++];
+            // Skip zeroes
+            while (b == EXTENDED_VLQ_FLAG)
+                b = span[_trackPos++];
+
+            int maxPos = _trackPos + MAX_SHIFTCOUNT;
+            while (b >= EXTENDED_VLQ_FLAG)
+            {
+                if (_trackPos < maxPos)
+                    b = span[_trackPos++];
+                else
+                    throw new Exception("Invalid variable length quantity");
+            }
         }
     }
 
@@ -252,7 +238,6 @@ namespace YARG.Core.IO
         Coop_6,
         Keys,
         Drums,
-        EliteDrums,
         Vocals,
         Harm1,
         Harm2,
@@ -314,16 +299,9 @@ namespace YARG.Core.IO
         Reset_Or_Meta = 0xFF,
     };
 
-    public struct MidiStats
-    {
-        public long          Position;
-        public MidiEventType Type;
-        public int           Channel;
-    }
-
     public struct MidiNote
     {
-        public byte Value;
-        public byte Velocity;
+        public int value;
+        public int velocity;
     };
 }

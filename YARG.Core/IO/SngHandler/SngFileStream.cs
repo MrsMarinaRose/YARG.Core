@@ -1,111 +1,159 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading.Tasks;
+using YARG.Core.Extensions;
 
 namespace YARG.Core.IO
 {
     public class SngFileStream : Stream
     {
-        //                1MB
-        private const int BUFFER_SIZE = 1024 * 1024;
+        private const int KEY_MASK = 0xFF;
+
+        private static readonly int VECTOR_MASK = SngMask.VECTORBYTE_COUNT - 1;
+        private static readonly int NUM_VECTORS_MASK = SngMask.NUMVECTORS - 1;
+        private static readonly int VECTOR_SHIFT;
+        private static readonly int VECTOR_INDEX_MASK;
+
+        static SngFileStream()
+        {
+            int val = SngMask.VECTORBYTE_COUNT;
+            while (val > 1)
+            {
+                VECTOR_SHIFT++;
+                val >>= 1;
+            }
+            VECTOR_INDEX_MASK = NUM_VECTORS_MASK << VECTOR_SHIFT;
+        }
+
+        public static byte[] LoadFile(FileStream stream, SngMask mask, long fileSize, long position)
+        {
+            if (stream.Seek(position, SeekOrigin.Begin) != position)
+                throw new EndOfStreamException();
+
+            byte[] buffer = stream.ReadBytes((int)fileSize);
+            unsafe
+            {
+                fixed (byte* ptr = buffer)
+                {
+                    var buffEnd = ptr + buffer.Length;
+                    var buffIndex = buffer.Length & ~VECTOR_MASK;
+                    var buffPosition = ptr + buffIndex;
+
+                    var vecPtr = (Vector<byte>*) ptr;
+                    Parallel.For(0, SngMask.NUMVECTORS, i =>
+                    {
+                        var xor = mask.Vectors[i];
+                        for (var loc = vecPtr + i; loc < buffPosition; loc += SngMask.NUMVECTORS)
+                        {
+                            *loc ^= xor;
+                        }
+                    });
+
+                    long keyIndex = buffIndex & KEY_MASK;
+                    while (buffPosition < buffEnd)
+                    {
+                        *buffPosition++ ^= mask.Keys.Ptr[keyIndex++];
+                    }
+                }
+            }
+            return buffer;
+        }
+
+        // 128kiB
+        private const int BUFFER_SIZE = 128 * 1024;
         private const int SEEK_MODULUS = BUFFER_SIZE - 1;
+        private const int SEEK_MODULUS_MINUS = ~SEEK_MODULUS;
 
-        private readonly SngTracker _tracker;
-        private readonly string _filename;
-        private readonly SngFileListing _listing;
-        private readonly FixedArray<byte> _dataBuffer = FixedArray<byte>.AllocVectorAligned(BUFFER_SIZE);
+        private readonly FileStream _stream;
+        private readonly long fileSize;
+        private readonly long initialOffset;
 
-        private int  _bufferIndex;
-        private int  _bufferPosition;
-        private int  _position;
+        private readonly SngMask mask;
+        private readonly FixedArray<byte> dataBuffer = FixedArray<byte>.Alloc(BUFFER_SIZE);
 
-        public override bool CanRead => _tracker.Stream.CanRead;
+        public  readonly string Name;
+
+
+        private int bufferPosition;
+        private long _position;
+        private bool disposedStream;
+
+        public override bool CanRead => _stream.CanRead;
         public override bool CanWrite => false;
-        public override bool CanSeek => _tracker.Stream.CanSeek;
-        public override long Length => _listing.Length;
+        public override bool CanSeek => _stream.CanSeek;
+        public override long Length => fileSize;
 
         public override long Position
         {
             get => _position;
             set
             {
-                if (value < 0 || value > _listing.Length)
-                {
-                    throw new ArgumentOutOfRangeException();
-                }
+                if (value < 0 || value > fileSize) throw new ArgumentOutOfRangeException();
 
-                _position = (int)value;
-                long index = _position / BUFFER_SIZE;
-                if (_bufferIndex != index)
-                {
-                    _bufferIndex = -1;
-                }
-                else
-                {
-                    _bufferPosition = _position % BUFFER_SIZE;
-                }
+                _position = value;
+                if (value == fileSize)
+                    return;
+
+                _stream.Seek(_position + initialOffset, SeekOrigin.Begin);
+                bufferPosition = (int)(value & SEEK_MODULUS);
+                UpdateBuffer();
             }
         }
 
-        public string Name => _filename;
-
-        public SngFileStream(string name, in SngFileListing listing, SngTracker tracker)
+        public SngFileStream(string name, FileStream stream, SngMask mask, long fileSize, long position)
         {
-            _filename = name;
-            _listing = listing;
-            _tracker = tracker.AddOwner();
-            _bufferIndex = -1;
+            Name = name;
+            _stream = stream;
+
+            this.fileSize = fileSize;
+            this.mask = mask;
+
+            initialOffset = position;
+
+            _stream.Seek(position, SeekOrigin.Begin);
+            UpdateBuffer();
         }
 
         public override int Read(byte[] buffer, int offset, int count)
         {
             if (offset < 0 || count < 0)
-            {
                 throw new ArgumentOutOfRangeException();
-            }
 
             if (buffer == null)
-            {
                 throw new ArgumentNullException();
-            }
 
             if (buffer.Length < offset + count)
-            {
                 throw new ArgumentException();
-            }
 
-            if (_position == _listing.Length)
-            {
+            if (_position == fileSize)
                 return 0;
-            }
 
             int read = 0;
-            while (read < count && _position < _listing.Length)
+            long bytesLeftInSection = dataBuffer.Length - bufferPosition;
+            if (bytesLeftInSection > fileSize - _position)
+                bytesLeftInSection = fileSize - _position;
+
+            while (read < count)
             {
-                if (_bufferIndex == -1 ||_bufferPosition == BUFFER_SIZE)
-                {
-                    UpdateBuffer();
-                }
+                int readCount = count - read;
+                if (readCount > bytesLeftInSection)
+                    readCount = (int)bytesLeftInSection;
 
-                int available = BUFFER_SIZE - _bufferPosition;
-                long remainingInFile = _listing.Length - _position;
-                if (available > remainingInFile)
-                {
-                    available = (int)remainingInFile;
-                }
+                Unsafe.CopyBlock(ref buffer[offset + read], ref dataBuffer[bufferPosition], (uint) readCount);
 
-                int amount = count - read;
-                if (amount > available)
-                {
-                    amount = available;
-                }
+                read += readCount;
+                _position += readCount;
+                bufferPosition += readCount;
 
-                Unsafe.CopyBlock(ref buffer[offset + read], ref _dataBuffer[_bufferPosition], (uint) amount);
-                read += amount;
-                _position += amount;
-                _bufferPosition += amount;
+                if (bufferPosition < dataBuffer.Length || _position == fileSize)
+                    break;
+
+                bufferPosition = 0;
+                bytesLeftInSection = UpdateBuffer();
             }
             return read;
         }
@@ -122,7 +170,7 @@ namespace YARG.Core.IO
                     Position += offset;
                     break;
                 case SeekOrigin.End:
-                    Position = _listing.Length + offset;
+                    Position = fileSize + offset;
                     break;
             }
             return _position;
@@ -130,10 +178,7 @@ namespace YARG.Core.IO
 
         public override void Flush()
         {
-            lock (_tracker.Stream)
-            {
-                _tracker.Stream.Flush();
-            }
+            _stream.Flush();
         }
 
         public override void SetLength(long value)
@@ -148,63 +193,74 @@ namespace YARG.Core.IO
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing)
+            if (!disposedStream)
             {
-                _dataBuffer.Dispose();
-                _tracker.Dispose();
+                if (disposing)
+                {
+                    _stream.Dispose();
+                    dataBuffer.Dispose();
+                    mask.Dispose();
+                }
+                disposedStream = true;
             }
         }
 
-        // We make a local copy to grant direct access to the Keys pointer
-        // without having to make a `fixed` call
-        private unsafe void UpdateBuffer()
+
+        private unsafe long UpdateBuffer()
         {
-            _bufferPosition = _position % BUFFER_SIZE;
-            int index = _position / BUFFER_SIZE;
-            if (index == _bufferIndex)
-            {
-                return;
-            }
-            _bufferIndex = index;
+            int readCount = BUFFER_SIZE - bufferPosition;
+            if (readCount > fileSize - _position)
+                readCount = (int)(fileSize - _position);
 
-            long readCount = BUFFER_SIZE;
-            long readPosition = _position - _bufferPosition;
-            if (readCount > _listing.Length - readPosition)
-            {
-                readCount = _listing.Length - readPosition;
-            }
+            var buffer = dataBuffer.Slice(bufferPosition, readCount);
+            if (_stream.Read(buffer) != readCount)
+                throw new Exception("Seek error in SNGPKG subfile");
 
-            lock (_tracker.Stream)
+            int buffIndex = bufferPosition;
+            int count = SngMask.VECTORBYTE_COUNT - (buffIndex & VECTOR_MASK);
+            if (count > readCount)
+                count = readCount;
+
+            // Line up to a vector boundary
+            if (count != SngMask.VECTORBYTE_COUNT)
             {
-                _tracker.Stream.Position = readPosition + _listing.Position;
-                if (_tracker.Stream.Read(_dataBuffer[..(int)readCount]) != readCount)
+                int key = buffIndex & KEY_MASK;
+                for (int i = 0; i < count; ++i)
                 {
-                    throw new IOException("Read error in SNGPKG subfile");
+                    dataBuffer.Ptr[buffIndex++] ^= mask.Keys.Ptr[key++];
+                }
+
+                // No need to do anything else
+                if (count == readCount)
+                {
+                    return readCount;
                 }
             }
-            DecryptVectorized(_dataBuffer.Ptr, _tracker.Mask, _dataBuffer.Ptr + readCount);
-        }
 
-        public static unsafe void DecryptVectorized(byte* position, SngMask mask, byte* end)
-        {
-            byte* keyPosition = mask.Ptr;
-            Parallel.For(0, SngMask.NUM_VECTORS, i =>
+            int endIndex = bufferPosition + readCount;
+            var endPtr = dataBuffer.Ptr + endIndex;
+
+            int vectorIndex = (buffIndex & VECTOR_INDEX_MASK) >> VECTOR_SHIFT;
+            int vectorMax = endIndex & ~VECTOR_MASK;
+            
+            var buffPosition = dataBuffer.Ptr + vectorMax;
+            var vecPtr = (Vector<byte>*) (dataBuffer.Ptr + buffIndex);
+            Parallel.For(0, SngMask.NUMVECTORS, i =>
             {
-                var xor = *((Vector<byte>*) keyPosition + i);
-                for (var loc = (Vector<byte>*) position + i; loc + 1 <= end; loc += SngMask.NUM_VECTORS)
+                // Faster "% NUM_VECTORS"
+                var xor = mask.Vectors[(i + vectorIndex) & NUM_VECTORS_MASK];
+                for (var loc = vecPtr + i; loc < buffPosition; loc += SngMask.NUMVECTORS)
                 {
                     *loc ^= xor;
                 }
             });
 
-            long numVecs = (end - position) / sizeof(Vector<byte>);
-            position += numVecs * sizeof(Vector<byte>);
-            keyPosition += (numVecs % SngMask.NUM_VECTORS) * sizeof(Vector<byte>);
-
-            while (position < end)
+            long keyIndex = vectorMax & KEY_MASK;
+            while (buffPosition < endPtr)
             {
-                *position++ ^= *keyPosition++;
+                *buffPosition++ ^= mask.Keys.Ptr[keyIndex++];
             }
+            return readCount;
         }
     }
 }

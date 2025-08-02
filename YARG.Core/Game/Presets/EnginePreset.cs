@@ -1,18 +1,10 @@
-﻿using YARG.Core.Game.Settings;
-
-namespace YARG.Core.Game
+﻿namespace YARG.Core.Game
 {
     public partial class EnginePreset : BasePreset
     {
-        [SettingSubSection]
         public FiveFretGuitarPreset FiveFretGuitar;
-        [SettingSubSection]
-        public DrumsPreset Drums;
-        [SettingSubSection]
-        public VocalsPreset Vocals;
-        [SettingSubSection]
-        public ProKeysPreset ProKeys;
-        [SettingSubSection]
+        public DrumsPreset          Drums;
+        public VocalsPreset         Vocals;
         public SixFretGuitarPreset SixFretGuitar;
 
         public EnginePreset(string name, bool defaultPreset = false) : base(name, defaultPreset)
@@ -20,7 +12,6 @@ namespace YARG.Core.Game
             FiveFretGuitar = new FiveFretGuitarPreset();
             Drums = new DrumsPreset();
             Vocals = new VocalsPreset();
-            ProKeys = new ProKeysPreset();
             SixFretGuitar = new SixFretGuitarPreset();
         }
 
@@ -31,7 +22,6 @@ namespace YARG.Core.Game
                 FiveFretGuitar = FiveFretGuitar.Copy(),
                 Drums = Drums.Copy(),
                 Vocals = Vocals.Copy(),
-                ProKeys = ProKeys.Copy(),
                 SixFretGuitar = SixFretGuitar.Copy()
             };
         }

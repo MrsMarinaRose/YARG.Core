@@ -12,7 +12,7 @@ namespace YARG.Core.Chart
             NotEnoughBytesPolicy = NotEnoughBytesPolicy.Ignore,
             NoHeaderChunkPolicy = NoHeaderChunkPolicy.Ignore,
             InvalidChannelEventParameterValuePolicy = InvalidChannelEventParameterValuePolicy.ReadValid,
-            TextEncoding = YARGTextReader.UTF8Strict,
+            TextEncoding = YARGTextContainer.UTF8Strict,
         };
 	}
 
@@ -24,7 +24,7 @@ namespace YARG.Core.Chart
             NotEnoughBytesPolicy = NotEnoughBytesPolicy.Ignore,
             NoHeaderChunkPolicy = NoHeaderChunkPolicy.Ignore,
             InvalidChannelEventParameterValuePolicy = InvalidChannelEventParameterValuePolicy.ReadValid,
-            TextEncoding = YARGTextReader.Latin1,
+            TextEncoding = YARGTextContainer.Latin1,
         };
 	}
 }

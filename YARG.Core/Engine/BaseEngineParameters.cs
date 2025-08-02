@@ -1,62 +1,37 @@
-﻿using System.Globalization;
+﻿using System;
 using System.IO;
-using System.Linq;
-using YARG.Core.Extensions;
-using YARG.Core.IO;
+using YARG.Core.Utility;
 
 namespace YARG.Core.Engine
 {
-    public abstract class BaseEngineParameters
+    public abstract class BaseEngineParameters : IBinarySerializable
     {
         public readonly HitWindowSettings HitWindow;
 
-        public readonly int MaxMultiplier;
+        public int MaxMultiplier { get; private set; }
 
-        public readonly double StarPowerWhammyBuffer;
-
-        public readonly double SustainDropLeniency;
-
-        public readonly float[] StarMultiplierThresholds;
+        public float[] StarMultiplierThresholds { get; private set; }
 
         public double SongSpeed;
 
-        protected BaseEngineParameters(HitWindowSettings hitWindow, int maxMultiplier, double spWhammyBuffer,
-            double sustainDropLeniency, float[] starMultiplierThresholds)
+        protected BaseEngineParameters()
         {
-            HitWindow = hitWindow;
-            StarPowerWhammyBuffer = spWhammyBuffer;
-            SustainDropLeniency = sustainDropLeniency;
-            MaxMultiplier = maxMultiplier;
-            StarMultiplierThresholds = starMultiplierThresholds;
+            HitWindow = new HitWindowSettings();
+            StarMultiplierThresholds = Array.Empty<float>();
         }
 
-        protected BaseEngineParameters(ref FixedArrayStream stream, int version)
+        protected BaseEngineParameters(HitWindowSettings hitWindow, int maxMultiplier, float[] starMultiplierThresholds)
         {
-            HitWindow = new HitWindowSettings(ref stream, version);
-            MaxMultiplier = stream.Read<int>(Endianness.Little);
-            StarPowerWhammyBuffer = stream.Read<double>(Endianness.Little);
-
-            // Version 7 but DATA_MIN was increased so no need to version check
-            SustainDropLeniency = stream.Read<double>(Endianness.Little);
-
-            // Read star multiplier thresholds
-            int count = stream.Read<int>(Endianness.Little);
-            StarMultiplierThresholds = new float[count];
-            for (int i = 0; i < StarMultiplierThresholds.Length; i++)
-            {
-                StarMultiplierThresholds[i] = stream.Read<float>(Endianness.Little);
-            }
-
-            SongSpeed = stream.Read<double>(Endianness.Little);
+            HitWindow = hitWindow;
+            MaxMultiplier = maxMultiplier;
+            StarMultiplierThresholds = starMultiplierThresholds;
         }
 
         public virtual void Serialize(BinaryWriter writer)
         {
             HitWindow.Serialize(writer);
-            writer.Write(MaxMultiplier);
-            writer.Write(StarPowerWhammyBuffer);
 
-            writer.Write(SustainDropLeniency);
+            writer.Write(MaxMultiplier);
 
             // Write star multiplier thresholds
             writer.Write(StarMultiplierThresholds.Length);
@@ -68,16 +43,23 @@ namespace YARG.Core.Engine
             writer.Write(SongSpeed);
         }
 
-        public override string ToString()
+        public virtual void Deserialize(BinaryReader reader, int version = 0)
         {
-            var thresholds = string.Join(", ",
-                StarMultiplierThresholds.Select(i => i.ToString(CultureInfo.InvariantCulture)));
+            HitWindow.Deserialize(reader, version);
 
-            return
-                $"Hit window: ({HitWindow.MinWindow}, {HitWindow.MaxWindow})\n" +
-                $"Hit window dynamic: {HitWindow.IsDynamic}\n" +
-                $"Max multiplier: {MaxMultiplier}\n" +
-                $"Star thresholds: {thresholds}";
+            MaxMultiplier = reader.ReadInt32();
+
+            // Read star multiplier thresholds
+            StarMultiplierThresholds = new float[reader.ReadInt32()];
+            for (int i = 0; i < StarMultiplierThresholds.Length; i++)
+            {
+                StarMultiplierThresholds[i] = reader.ReadSingle();
+            }
+
+            if (version >= 5)
+            {
+                SongSpeed = reader.ReadDouble();
+            }
         }
     }
 }

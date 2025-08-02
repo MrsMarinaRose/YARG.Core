@@ -1,4 +1,4 @@
-﻿namespace YARG.Core.Engine
+namespace YARG.Core.Engine
 {
     public class SoloSection
     {

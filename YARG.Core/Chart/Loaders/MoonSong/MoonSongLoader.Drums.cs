@@ -220,8 +220,6 @@ namespace YARG.Core.Chart
 
             if (_currentInstrument is not Instrument.FourLaneDrums)
             {
-                var flags = moonNote.flags;
-
                 // Disco flip
                 if (_discoFlip)
                 {
@@ -229,18 +227,18 @@ namespace YARG.Core.Chart
                     {
                         // Red drums in disco flip are turned into yellow cymbals
                         pad = FourLaneDrumPad.YellowDrum;
-                        flags |= MoonNote.Flags.ProDrums_Cymbal;
+                        moonNote.flags |= MoonNote.Flags.ProDrums_Cymbal;
                     }
                     else if (pad == FourLaneDrumPad.YellowDrum)
                     {
                         // Both yellow cymbals and yellow drums are turned into red drums in disco flip
                         pad = FourLaneDrumPad.RedDrum;
-                        flags &= ~MoonNote.Flags.ProDrums_Cymbal;
+                        moonNote.flags &= ~MoonNote.Flags.ProDrums_Cymbal;
                     }
                 }
 
                 // Cymbal marking
-                if ((flags & MoonNote.Flags.ProDrums_Cymbal) != 0)
+                if ((moonNote.flags & MoonNote.Flags.ProDrums_Cymbal) != 0)
                 {
                     pad = pad switch
                     {

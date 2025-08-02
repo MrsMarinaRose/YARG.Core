@@ -17,7 +17,10 @@ namespace YARG.Core.Game
             },
             Vocals =
             {
-                PerfectPitchPercent = 0.85f
+                WindowSizeE = 2.2,
+                WindowSizeM = 1.8,
+                WindowSizeH = 1.4,
+                WindowSizeX = 1
             }
         };
 
@@ -29,12 +32,9 @@ namespace YARG.Core.Game
                 StrumLeniencySmall = 0.02,
                 HitWindow =
                 {
-                    MaxWindow = 0.12,
+                    MaxWindow = 0.13,
                     MinWindow = 0.04,
                     IsDynamic = true,
-                    DynamicScale = 1,
-                    DynamicSlope = 0.93,
-                    DynamicGamma = 1.5,
                 }
             },
             Drums =
@@ -42,20 +42,16 @@ namespace YARG.Core.Game
                 HitWindow =
                 {
                     MaxWindow = 0.13,
-                    MinWindow = 0.05,
+                    MinWindow = 0.04,
                     IsDynamic = true,
-                    DynamicScale = 1,
-                    DynamicSlope = 0.60615,
-                    DynamicGamma = 2
                 }
             },
             Vocals =
             {
-                PitchWindowE = 1.4f,
-                PitchWindowM = 1.1f,
-                PitchWindowH = 0.8f,
-                PitchWindowX = 0.6f,
-                PerfectPitchPercent = 0.55f
+                WindowSizeE = 1.2,
+                WindowSizeM = 1,
+                WindowSizeH = 0.8,
+                WindowSizeX = 0.6
             }
         };
 

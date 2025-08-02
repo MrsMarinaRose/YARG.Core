@@ -1,162 +1,94 @@
 ﻿using System;
-using System.Globalization;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
+using YARG.Core.Extensions;
 using YARG.Core.IO;
-using YARG.Core.Logging;
 
 namespace YARG.Core.Song
 {
     [Serializable]
-    public unsafe struct HashWrapper : IComparable<HashWrapper>, IEquatable<HashWrapper>
+    public readonly struct HashWrapper : IComparable<HashWrapper>, IEquatable<HashWrapper>
     {
         public static HashAlgorithm Algorithm => SHA1.Create();
 
         public const int HASH_SIZE_IN_BYTES = 20;
         public const int HASH_SIZE_IN_INTS = HASH_SIZE_IN_BYTES / sizeof(int);
 
-        private fixed int _hash[HASH_SIZE_IN_INTS];
+        private readonly FixedArray<byte> _hash;
+        private readonly int          _hashcode;
 
-        public readonly byte[] HashBytes
+        public byte[] HashBytes
         {
             get
             {
-                var bytes = new byte[HASH_SIZE_IN_BYTES];
-                fixed (byte* ptr = bytes)
-                {
-                    int* integers = (int*)ptr;
-                    for (var i = 0; i < HASH_SIZE_IN_INTS; i++)
-                    {
-                        integers[i] = _hash[i];
-                    }
-                }
-                return bytes;
+                return _hash.ToArray();
             }
         }
 
-        public static HashWrapper Deserialize(Stream stream)
+        public static HashWrapper Deserialize(BinaryReader reader)
         {
-            var wrapper = new HashWrapper();
-            var span = new Span<byte>(wrapper._hash, HASH_SIZE_IN_BYTES);
-            if (stream.Read(span) != HASH_SIZE_IN_BYTES)
+            using var hash = DisposableCounter.Wrap(FixedArray<byte>.Alloc(HASH_SIZE_IN_BYTES));
+            if (reader.Read(hash.Value.Span) != HASH_SIZE_IN_BYTES)
             {
                 throw new EndOfStreamException();
             }
-            return wrapper;
-        }
-
-        public static HashWrapper Deserialize(ref FixedArrayStream stream)
-        {
-            var wrapper = new HashWrapper();
-            stream.Read(wrapper._hash, HASH_SIZE_IN_BYTES);
-            return wrapper;
+            return new HashWrapper(hash.Release());
         }
 
         public static HashWrapper Hash(ReadOnlySpan<byte> span)
         {
-            var wrapper = new HashWrapper();
-            var hashSpan = new Span<byte>(wrapper._hash, HASH_SIZE_IN_BYTES);
-
             using var algo = Algorithm;
-            if (!algo.TryComputeHash(span, hashSpan, out int written))
+            using var hash = DisposableCounter.Wrap(FixedArray<byte>.Alloc(HASH_SIZE_IN_BYTES));
+            if (!algo.TryComputeHash(span, hash.Value.Span, out int written))
             {
                 throw new Exception("fucking how??? Hash generation error");
             }
-            return wrapper;
+            return new HashWrapper(hash.Release());
         }
 
-        public static HashWrapper Create(ReadOnlySpan<byte> hash)
-        {
-            var wrapper = new HashWrapper();
-            var span = new Span<byte>(wrapper._hash, HASH_SIZE_IN_BYTES);
-            hash.CopyTo(span);
-            return wrapper;
-        }
+        public HashWrapper(byte[] hash)
+            : this(FixedArray<byte>.Pin(hash)) { }
 
-        public static HashWrapper FromString(ReadOnlySpan<char> str)
+        private HashWrapper(FixedArray<byte> hash)
         {
-            var wrapper = new HashWrapper();
-            try
+            _hash = hash;
+            _hashcode = 0;
+
+            unsafe
             {
-                var bytes = new Span<byte>(wrapper._hash, HASH_SIZE_IN_BYTES);
-                for (int i = 0; i < HASH_SIZE_IN_BYTES; i++)
+                int* integers = (int*) hash.Ptr;
+                for (int i = 0; i < HASH_SIZE_IN_INTS; i++)
                 {
-                    // Each set of 2 characters represents 1 byte
-                    var slice = str.Slice(i *  2, 2);
-                    bytes[i]= byte.Parse(slice, NumberStyles.AllowHexSpecifier);
+                    _hashcode ^= integers[i];
                 }
             }
-            catch (Exception e)
-            {
-                YargLogger.LogException(e, "Failed to read hash");
-            }
-            return wrapper;
         }
 
-        public readonly void Serialize(BinaryWriter writer)
+        public void Serialize(BinaryWriter writer)
         {
-            fixed (int* values = _hash)
-            {
-                var bytes = new Span<byte>(values, HASH_SIZE_IN_BYTES);
-                writer.Write(bytes);
-            }
+            writer.Write(_hash.ReadOnlySpan);
         }
 
-        public readonly void Serialize(Stream stream)
+        public int CompareTo(HashWrapper other)
         {
-            fixed (int* values = _hash)
-            {
-                var bytes = new Span<byte>(values, HASH_SIZE_IN_BYTES);
-                stream.Write(bytes);
-            }
+            return _hash.ReadOnlySpan.SequenceCompareTo(other._hash.ReadOnlySpan);
         }
 
-        public readonly int CompareTo(HashWrapper other)
+        public bool Equals(HashWrapper other)
         {
-            for (int i = 0; i < HASH_SIZE_IN_INTS; ++i)
-            {
-                if (_hash[i] != other._hash[i])
-                {
-                    return _hash[i] - other._hash[i];
-                }
-            }
-            return 0;
+            return _hash.ReadOnlySpan.SequenceEqual(other._hash.ReadOnlySpan);
         }
 
-        public readonly bool Equals(HashWrapper other)
+        public override int GetHashCode()
         {
-            for (int i = 0; i < HASH_SIZE_IN_INTS; ++i)
-            {
-                if (_hash[i] != other._hash[i])
-                {
-                    return false;
-                }
-            }
-            return true;
+            return _hashcode;
         }
 
-        public readonly override int GetHashCode()
+        public override string ToString()
         {
-            int hashcode = 0;
-            for (int i = 0; i < HASH_SIZE_IN_INTS; ++i)
-            {
-                hashcode ^= _hash[i];
-            }
-            return hashcode;
-        }
-
-        public readonly override string ToString()
-        {
-            string str = string.Empty;
-            fixed (int* values = _hash)
-            {
-                var bytes = new Span<byte>(values, HASH_SIZE_IN_BYTES);
-                for (int i = 0; i < HASH_SIZE_IN_BYTES; i++)
-                {
-                    str += bytes[i].ToString("X2");
-                }
-            }
-            return str;
+            return _hash.ReadOnlySpan.ToHexString(dashes: false);
         }
     }
 }

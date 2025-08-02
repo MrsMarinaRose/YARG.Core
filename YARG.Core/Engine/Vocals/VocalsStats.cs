@@ -1,7 +1,4 @@
 ﻿using System.IO;
-using YARG.Core.Extensions;
-using YARG.Core.IO;
-using YARG.Core.Replays;
 
 namespace YARG.Core.Engine.Vocals
 {
@@ -10,21 +7,12 @@ namespace YARG.Core.Engine.Vocals
         /// <summary>
         /// The amount of note ticks that was hit by the vocalist.
         /// </summary>
-        public uint TicksHit;
+        public uint VocalTicksHit;
 
         /// <summary>
         /// The amount of note ticks that were missed by the vocalist.
         /// </summary>
-        public uint TicksMissed;
-
-        /// <summary>
-        /// The total amount of note ticks.
-        /// </summary>
-        public uint TotalTicks => TicksHit + TicksMissed;
-
-        public override float Percent => TotalTicks == 0 ? 1f : (float) TicksHit / TotalTicks;
-
-        public override int BandComboUnits => 10;
+        public uint VocalTicksMissed;
 
         public VocalsStats()
         {
@@ -32,35 +20,31 @@ namespace YARG.Core.Engine.Vocals
 
         public VocalsStats(VocalsStats stats) : base(stats)
         {
-            TicksHit = stats.TicksHit;
-            TicksMissed = stats.TicksMissed;
-        }
-
-        public VocalsStats(ref FixedArrayStream stream, int version)
-            : base(ref stream, version)
-        {
-            TicksHit = stream.Read<uint>(Endianness.Little);
-            TicksMissed = stream.Read<uint>(Endianness.Little);
+            VocalTicksHit = stats.VocalTicksHit;
+            VocalTicksMissed = stats.VocalTicksMissed;
         }
 
         public override void Reset()
         {
             base.Reset();
-            TicksHit = 0;
-            TicksMissed = 0;
+            VocalTicksHit = 0;
+            VocalTicksMissed = 0;
         }
 
         public override void Serialize(BinaryWriter writer)
         {
             base.Serialize(writer);
 
-            writer.Write(TicksHit);
-            writer.Write(TicksMissed);
+            writer.Write(VocalTicksHit);
+            writer.Write(VocalTicksMissed);
         }
 
-        public override ReplayStats ConstructReplayStats(string name)
+        public override void Deserialize(BinaryReader reader, int version = 0)
         {
-            return new VocalsReplayStats(name, this);
+            base.Deserialize(reader, version);
+
+            VocalTicksHit = reader.ReadUInt32();
+            VocalTicksMissed = reader.ReadUInt32();
         }
     }
 }

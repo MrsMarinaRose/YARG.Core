@@ -4,41 +4,29 @@ namespace YARG.Core.Extensions
 {
     public static class MidiExtensions
     {
-        public static void Merge(this MidiFile targetFile, MidiFile sourceFile)
+        public static void Merge(this MidiFile targetFile, MidiFile file)
         {
-            // Index 1 to skip the sync track
-            for (int sourceIndex = 1; sourceIndex < sourceFile.Chunks.Count; sourceIndex++)
+            foreach (var track in file.GetTrackChunks())
             {
-                if (sourceFile.Chunks[sourceIndex] is not TrackChunk sourceTrack)
-                    continue;
-
-                // Add immediately if the track has no name,
-                // no reasonable way to compare if so
-                string sourceName = sourceTrack.GetTrackName();
-                if (string.IsNullOrEmpty(sourceName))
-                {
-                    targetFile.Chunks.Add(sourceTrack);
-                    continue;
-                }
-
                 // Replace any existing tracks first
                 bool isExisting = false;
-                for (int targetIndex = 1; targetIndex < targetFile.Chunks.Count; targetIndex++)
+                for (int targetIndex = 0; targetIndex < targetFile.Chunks.Count; targetIndex++)
                 {
-                    if (targetFile.Chunks[targetIndex] is not TrackChunk targetTrack)
+                    var chunk = targetFile.Chunks[targetIndex];
+                    if (chunk is not TrackChunk existingTrack)
                         continue;
 
-                    if (sourceName == targetTrack.GetTrackName())
-                    {
-                        targetFile.Chunks[targetIndex] = sourceTrack;
-                        isExisting = true;
-                        break;
-                    }
+                    string newName = track.GetTrackName();
+                    string existingName = existingTrack.GetTrackName();
+                    if (newName != existingName)
+                        continue;
+
+                    targetFile.Chunks[targetIndex] = track;
                 }
 
                 // Otherwise, add it
                 if (!isExisting)
-                    targetFile.Chunks.Add(sourceTrack);
+                    targetFile.Chunks.Add(track);
             }
         }
 

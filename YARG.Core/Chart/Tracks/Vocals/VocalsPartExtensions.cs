@@ -24,7 +24,7 @@
                     // of the normal lengths.
                     var newNote = new VocalNote(-1f, note.HarmonyPart, note.Type, note.Time,
                         note.TotalTimeLength, note.Tick, note.TotalTickLength);
-                    newPhraseParent.AddChildNote(newNote);
+                    newPhraseParent.AddNoteToPhrase(newNote);
                 }
 
                 // Replace the next and previous note values
@@ -39,24 +39,6 @@
                 var newPhrase = new VocalsPhrase(phrase.Time, phrase.TimeLength, phrase.Tick, phrase.TickLength,
                     newPhraseParent, phrase.Lyrics);
                 vocalsTrack.NotePhrases[i] = newPhrase;
-            }
-        }
-
-        public static void RemovePercussion(this VocalsPart vocalsTrack)
-        {
-            int i = 0;
-            while (i < vocalsTrack.NotePhrases.Count)
-            {
-                var phrase = vocalsTrack.NotePhrases[i];
-                phrase.PhraseParentNote.RemovePercussionChildNotes();
-
-                if (phrase.IsEmpty)
-                {
-                    vocalsTrack.NotePhrases.RemoveAt(i);
-                    continue;
-                }
-
-                i++;
             }
         }
     }

@@ -91,32 +91,30 @@ namespace YARG.Core.UnitTests.Parsing
         {
             builder.Append($"[{SECTION_SYNC_TRACK}]{NEWLINE}{{{NEWLINE}");
 
-            var syncTrack = sourceSong.syncTrack;
-
             // Indexing the separate lists is the only way to
             // 1: Not allocate more space for a combined list, and
             // 2: Not rely on polymorphic queries
             int timeSigIndex = 0;
             int bpmIndex = 0;
-            while (timeSigIndex < syncTrack.TimeSignatures.Count ||
-                   bpmIndex < syncTrack.Tempos.Count)
+            while (timeSigIndex < sourceSong.timeSignatures.Count ||
+                   bpmIndex < sourceSong.bpms.Count)
             {
                 // Generate in this order: time sig, bpm
-                while (timeSigIndex < syncTrack.TimeSignatures.Count &&
+                while (timeSigIndex < sourceSong.timeSignatures.Count &&
                     // Time sig comes before or at the same time as a bpm
-                    (bpmIndex == syncTrack.Tempos.Count || syncTrack.TimeSignatures[timeSigIndex].Tick <= syncTrack.Tempos[bpmIndex].Tick))
+                    (bpmIndex == sourceSong.bpms.Count || sourceSong.timeSignatures[timeSigIndex].tick <= sourceSong.bpms[bpmIndex].tick))
                 {
-                    var ts = syncTrack.TimeSignatures[timeSigIndex++];
-                    builder.Append($"  {ts.Tick} = TS {ts.Numerator} {(int) Math.Log2(ts.Denominator)}{NEWLINE}");
+                    var ts = sourceSong.timeSignatures[timeSigIndex++];
+                    builder.Append($"  {ts.tick} = TS {ts.numerator} {(int) Math.Log2(ts.denominator)}{NEWLINE}");
                 }
 
-                while (bpmIndex < syncTrack.Tempos.Count &&
+                while (bpmIndex < sourceSong.bpms.Count &&
                     // Bpm comes before a time sig (equals does not count)
-                    (timeSigIndex == syncTrack.TimeSignatures.Count || syncTrack.Tempos[bpmIndex].Tick < syncTrack.TimeSignatures[timeSigIndex].Tick))
+                    (timeSigIndex == sourceSong.timeSignatures.Count || sourceSong.bpms[bpmIndex].tick < sourceSong.timeSignatures[timeSigIndex].tick))
                 {
-                    var bpm = syncTrack.Tempos[bpmIndex++];
-                    uint writtenBpm = (uint) (bpm.BeatsPerMinute * 1000);
-                    builder.Append($"  {bpm.Tick} = B {writtenBpm}{NEWLINE}");
+                    var bpm = sourceSong.bpms[bpmIndex++];
+                    uint writtenBpm = (uint) (bpm.value * 1000);
+                    builder.Append($"  {bpm.tick} = B {writtenBpm}{NEWLINE}");
                 }
             }
             builder.Append($"}}{NEWLINE}");
@@ -145,7 +143,7 @@ namespace YARG.Core.UnitTests.Parsing
 
                 while (eventIndex < sourceSong.events.Count &&
                     // Event comes before a section (equals does not count)
-                    (sectionIndex == sourceSong.sections.Count || sourceSong.events[eventIndex].tick < sourceSong.sections[sectionIndex].tick))
+                    (sectionIndex == sourceSong.sections.Count || sourceSong.bpms[eventIndex].tick < sourceSong.sections[sectionIndex].tick))
                 {
                     var ev = sourceSong.events[eventIndex++];
                     builder.Append($"  {ev.tick} = E \"{ev.text}\"");

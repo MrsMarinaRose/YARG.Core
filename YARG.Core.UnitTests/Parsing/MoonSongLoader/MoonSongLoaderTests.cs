@@ -13,7 +13,12 @@ namespace YARG.Core.UnitTests.Parsing
 
         internal static MoonSong CreateSong()
         {
-            return new MoonSong(RESOLUTION);
+            var song = new MoonSong()
+            {
+                resolution = RESOLUTION,
+            };
+            song.UpdateBPMTimeValues(); // Necessary for default tempo map to exist
+            return song;
         }
     }
 }

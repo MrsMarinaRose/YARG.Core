@@ -1,38 +1,24 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using YARG.Core.Audio;
 using YARG.Core.Chart;
-using YARG.Core.IO;
+using YARG.Core.Logging;
 using YARG.Core.Venue;
 
 namespace YARG.Core.Song
 {
-    public class BackgroundResult : IDisposable
+    public class BackgroundResult
     {
-        private YARGImage?     _image;
-        public  BackgroundType Type   { get; }
-        public  Stream?        Stream { get; }
+        public readonly BackgroundType Type;
+        public readonly Stream? Stream;
 
-        public YARGImage Image => _image;
-
-        public BackgroundResult(BackgroundType type, Stream stream)
+        public BackgroundResult(BackgroundType type, Stream? stream)
         {
-            _image = null;
             Type = type;
             Stream = stream;
-        }
-
-        public BackgroundResult(YARGImage image)
-        {
-            _image = image;
-            Type = BackgroundType.Image;
-            Stream = null;
-        }
-
-        public void Dispose()
-        {
-            _image?.Dispose();
-            Stream?.Dispose();
         }
     }
 
@@ -41,8 +27,8 @@ namespace YARG.Core.Song
         public abstract SongChart? LoadChart();
         public abstract StemMixer? LoadAudio(float speed, double volume, params SongStem[] ignoreStems);
         public abstract StemMixer? LoadPreviewAudio(float speed);
-        public abstract YARGImage? LoadAlbumData();
-        public abstract BackgroundResult? LoadBackground();
-        public abstract FixedArray<byte>? LoadMiloData();
+        public abstract byte[]? LoadAlbumData();
+        public abstract BackgroundResult? LoadBackground(BackgroundType options);
+        public abstract byte[]? LoadMiloData();
     }
 }

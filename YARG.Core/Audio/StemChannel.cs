@@ -21,7 +21,6 @@ namespace YARG.Core.Audio
             var settings = GlobalAudioHandler.StemSettings[Stem];
             settings.OnVolumeChange += SetVolume;
             settings.OnReverbChange += SetReverb;
-            settings.OnWhammyPitchChange += SetWhammyPitch;
         }
 
         public void SetWhammyPitch(float percent)

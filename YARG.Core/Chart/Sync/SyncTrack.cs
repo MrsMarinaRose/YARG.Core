@@ -26,8 +26,8 @@ namespace YARG.Core.Chart
 
         public SyncTrack(uint resolution, List<TempoChange> tempos, List<TimeSignatureChange> timeSignatures,
             List<Beatline> beatlines)
-            : this(resolution)
         {
+            Resolution = resolution;
             Tempos = tempos;
             TimeSignatures = timeSignatures;
             Beatlines = beatlines;
@@ -193,7 +193,7 @@ namespace YARG.Core.Chart
         public double TickToTime(uint tick)
         {
             // Find the current tempo marker at the given tick
-            var currentTempo = Tempos.LowerBoundElement(tick);
+            var currentTempo = Tempos.GetPrevious(tick);
             if (currentTempo is null)
                 return 0;
 
@@ -211,7 +211,7 @@ namespace YARG.Core.Chart
                 return 0;
 
             // Find the current tempo marker at the given time
-            var currentTempo = Tempos.LowerBoundElement(time);
+            var currentTempo = Tempos.GetPrevious(time);
             if (currentTempo is null)
                 return 0;
 
@@ -251,7 +251,7 @@ namespace YARG.Core.Chart
 
             uint tickDelta = tickEnd - tickStart;
             double beatDelta = tickDelta / (double)resolution;
-            double timeDelta = beatDelta * 60.0 / currentTempo.BeatsPerMinute;
+            double timeDelta = beatDelta * currentTempo.SecondsPerBeat;
 
             return timeDelta;
         }
@@ -268,8 +268,8 @@ namespace YARG.Core.Chart
                     $"The given end time must occur after the starting time ({timeStart})!");
 
             double timeDelta = timeEnd - timeStart;
-            double beatDelta = timeDelta * currentTempo.BeatsPerMinute / 60.0;
-            uint tickDelta = (uint)Math.Round(beatDelta * resolution, 8);
+            double beatDelta = timeDelta / currentTempo.SecondsPerBeat;
+            uint tickDelta = (uint) (beatDelta * resolution);
 
             return tickDelta;
         }

@@ -26,16 +26,16 @@ namespace YARG.Core.Audio
 
         static GlobalAudioHandler()
         {
-            var vocals = new StemSettings();
-            var drums = new StemSettings();
+            var vocals = new StemSettings(AudioHelpers.SONG_VOLUME_MULTIPLIER);
+            var drums = new StemSettings(AudioHelpers.SONG_VOLUME_MULTIPLIER);
 
             StemSettings = new()
             {
-                { SongStem.Song,    new StemSettings() },
-                { SongStem.Guitar,  new StemSettings() },
-                { SongStem.Bass,    new StemSettings() },
-                { SongStem.Rhythm,  new StemSettings() },
-                { SongStem.Keys,    new StemSettings() },
+                { SongStem.Song,    new StemSettings(AudioHelpers.SONG_VOLUME_MULTIPLIER) },
+                { SongStem.Guitar,  new StemSettings(AudioHelpers.SONG_VOLUME_MULTIPLIER) },
+                { SongStem.Bass,    new StemSettings(AudioHelpers.SONG_VOLUME_MULTIPLIER) },
+                { SongStem.Rhythm,  new StemSettings(AudioHelpers.SONG_VOLUME_MULTIPLIER) },
+                { SongStem.Keys,    new StemSettings(AudioHelpers.SONG_VOLUME_MULTIPLIER) },
                 { SongStem.Vocals,  vocals },
                 { SongStem.Vocals1, vocals },
                 { SongStem.Vocals2, vocals },
@@ -44,13 +44,12 @@ namespace YARG.Core.Audio
                 { SongStem.Drums2,  drums },
                 { SongStem.Drums3,  drums },
                 { SongStem.Drums4,  drums },
-                { SongStem.Crowd,   new StemSettings() },
-                { SongStem.Sfx,     new StemSettings() },
-                { SongStem.DrumSfx, new StemSettings() },
+                { SongStem.Crowd,   new StemSettings(AudioHelpers.SONG_VOLUME_MULTIPLIER) },
+                { SongStem.Sfx,     new StemSettings(1) },
             };
         }
 
-        public static bool LogMixerStatus { get; internal set; }
+        internal static bool LogMixerStatus;
 
         public static bool UseWhammyFx;
         public static bool IsChipmunkSpeedup;
@@ -105,16 +104,6 @@ namespace YARG.Core.Audio
         public static void SetReverbSetting(SongStem stem, bool reverb)
         {
             StemSettings[stem].Reverb = reverb;
-        }
-
-        public static float GetWhammyPitchSetting(SongStem stem)
-        {
-            return StemSettings[stem].WhammyPitch;
-        }
-
-        public static void SetWhammyPitchSetting(SongStem stem, float percent)
-        {
-            StemSettings[stem].WhammyPitch = percent;
         }
 
         private static object _instanceLock = new();
@@ -244,18 +233,6 @@ namespace YARG.Core.Audio
                     throw new NotInitializedException();
                 }
                 _instance.SfxSamples[(int) sample]?.Play();
-            }
-        }
-
-        public static void PlayDrumSoundEffect(DrumSfxSample sample, double volume)
-        {
-            lock (_instanceLock)
-            {
-                if (_instance == null)
-                {
-                    throw new NotInitializedException();
-                }
-                _instance.DrumSfxSamples[(int) sample]?.Play(volume);
             }
         }
 

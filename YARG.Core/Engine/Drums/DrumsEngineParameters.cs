@@ -1,6 +1,4 @@
 ﻿using System.IO;
-using YARG.Core.Extensions;
-using YARG.Core.IO;
 
 namespace YARG.Core.Engine.Drums
 {
@@ -16,29 +14,17 @@ namespace YARG.Core.Engine.Drums
         /// <summary>
         /// What mode the inputs should be processed in.
         /// </summary>
-        public readonly DrumMode Mode;
+        public DrumMode Mode { get; private set; }
 
-        //Ghost notes are below this threshold, Accent notes are above 1 - threshold
-        public readonly float VelocityThreshold;
-
-        // The maximum allowed time (seconds) between notes to use context-sensitive velocity scoring
-        public readonly float SituationalVelocityWindow;
+        public DrumsEngineParameters()
+        {
+        }
 
         public DrumsEngineParameters(HitWindowSettings hitWindow, int maxMultiplier, float[] starMultiplierThresholds,
             DrumMode mode)
-            : base(hitWindow, maxMultiplier, 0, 0, starMultiplierThresholds)
+            : base(hitWindow, maxMultiplier, starMultiplierThresholds)
         {
             Mode = mode;
-            VelocityThreshold = 0.35f;
-            SituationalVelocityWindow = 1.5f;
-        }
-
-        public DrumsEngineParameters(ref FixedArrayStream stream, int version)
-            : base(ref stream, version)
-        {
-            Mode = (DrumMode) stream.ReadByte();
-            VelocityThreshold = stream.Read<float>(Endianness.Little);
-            SituationalVelocityWindow = stream.Read<float>(Endianness.Little);
         }
 
         public override void Serialize(BinaryWriter writer)
@@ -46,16 +32,13 @@ namespace YARG.Core.Engine.Drums
             base.Serialize(writer);
 
             writer.Write((byte) Mode);
-            writer.Write(VelocityThreshold);
-            writer.Write(SituationalVelocityWindow);
         }
 
-        public override string ToString()
+        public override void Deserialize(BinaryReader reader, int version = 0)
         {
-            return
-                $"{base.ToString()}\n" +
-                $"Velocity threshold: {VelocityThreshold}\n" +
-                $"Situational velocity window: {SituationalVelocityWindow}";
+            base.Deserialize(reader, version);
+
+            Mode = (DrumMode) reader.ReadByte();
         }
     }
 }
