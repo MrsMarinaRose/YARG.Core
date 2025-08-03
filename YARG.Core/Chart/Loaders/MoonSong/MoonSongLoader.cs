@@ -30,11 +30,8 @@ namespace YARG.Core.Chart
         private MoonSong.MoonInstrument _currentMoonInstrument;
         private MoonSong.Difficulty _currentMoonDifficulty;
 
-        public MoonSongLoader(MoonSong song, ParseSettings settings)
+        public MoonSongLoader(MoonSong song, in ParseSettings settings)
         {
-            if (settings.NoteSnapThreshold < 0)
-                settings.NoteSnapThreshold = 0;
-
             _moonSong = song;
             _settings = settings;
         }
@@ -57,7 +54,7 @@ namespace YARG.Core.Chart
             return new(song, settings);
         }
 
-        public static MoonSongLoader LoadDotChart(ParseSettings settings, string chartText)
+        public static MoonSongLoader LoadDotChart(ParseSettings settings, ReadOnlySpan<char> chartText)
         {
             var song = ChartReader.ReadFromText(ref settings, chartText);
             return new(song, settings);
@@ -99,38 +96,7 @@ namespace YARG.Core.Chart
 
         public SyncTrack LoadSyncTrack()
         {
-            var tempos = new List<TempoChange>(_moonSong.bpms.Count);
-            var timeSigs = new List<TimeSignatureChange>(_moonSong.timeSignatures.Count);
-            var beats = new List<Beatline>(_moonSong.beats.Count);
-
-            foreach (var moonBpm in _moonSong.bpms)
-            {
-                double time = _moonSong.TickToTime(moonBpm.tick);
-                var tempo = new TempoChange(moonBpm.value, time, moonBpm.tick);
-                tempos.Add(tempo);
-            }
-
-            foreach (var moonTimeSig in _moonSong.timeSignatures)
-            {
-                double time = _moonSong.TickToTime(moonTimeSig.tick);
-                var timeSig = new TimeSignatureChange(moonTimeSig.numerator, moonTimeSig.denominator, time, moonTimeSig.tick);
-                timeSigs.Add(timeSig);
-            }
-
-            foreach (var moonBeat in _moonSong.beats)
-            {
-                var beatType = moonBeat.type switch
-                {
-                    MoonBeat.Type.Measure => BeatlineType.Measure,
-                    MoonBeat.Type.Beat => BeatlineType.Strong,
-                    _ => throw new NotImplementedException($"Unhandled Moonscraper beat type {moonBeat.type}!")
-                };
-                double time = _moonSong.TickToTime(moonBeat.tick);
-                var beatline = new Beatline(beatType, time, moonBeat.tick);
-                beats.Add(beatline);
-            }
-
-            return new((uint) _moonSong.resolution, tempos, timeSigs, beats);
+            return _moonSong.syncTrack;
         }
 
         private InstrumentDifficulty<TNote> LoadDifficulty<TNote>(Instrument instrument, Difficulty difficulty,
@@ -219,6 +185,13 @@ namespace YARG.Core.Chart
                     MoonPhrase.Type.TrillLane           => PhraseType.TrillLane,
                     MoonPhrase.Type.ProDrums_Activation => PhraseType.DrumFill,
 
+                    MoonPhrase.Type.ProKeys_RangeShift0 => PhraseType.ProKeys_RangeShift0,
+                    MoonPhrase.Type.ProKeys_RangeShift1 => PhraseType.ProKeys_RangeShift1,
+                    MoonPhrase.Type.ProKeys_RangeShift2 => PhraseType.ProKeys_RangeShift2,
+                    MoonPhrase.Type.ProKeys_RangeShift3 => PhraseType.ProKeys_RangeShift3,
+                    MoonPhrase.Type.ProKeys_RangeShift4 => PhraseType.ProKeys_RangeShift4,
+                    MoonPhrase.Type.ProKeys_RangeShift5 => PhraseType.ProKeys_RangeShift5,
+
                     _ => null
                 };
 
@@ -268,6 +241,8 @@ namespace YARG.Core.Chart
             // Solos
             if (currentPhrases.TryGetValue(MoonPhrase.Type.Solo, out var solo) && IsEventInPhrase(moonNote, solo))
             {
+                flags |= NoteFlags.Solo;
+
                 if (previous == null || !IsEventInPhrase(previous, solo))
                     flags |= NoteFlags.SoloStart;
 
@@ -355,7 +330,7 @@ namespace YARG.Core.Chart
             if (phrase.length == 0)
                 return songObj.tick == phrase.tick;
 
-            return songObj.tick >= phrase.tick && songObj.tick < (phrase.tick + phrase.length);
+            return phrase.tick <= songObj.tick && songObj.tick < (phrase.tick + phrase.length);
         }
 
         private static bool IsNoteClosestToEndOfPhrase(MoonSong song, MoonNote note, MoonPhrase phrase)
@@ -388,7 +363,7 @@ namespace YARG.Core.Chart
                     if (previousNote is null)
                     {
                         // This is the first note in the chart, check by distance
-                        float tickThreshold = song.resolution / 3; // 1/12th note
+                        uint tickThreshold = song.resolution / 3; // 1/12th note
                         return Math.Abs((int) note.tick - endTick) < tickThreshold;
                     }
                     else if (note.tick >= endTick && previousNote.tick < endTick)
@@ -429,7 +404,7 @@ namespace YARG.Core.Chart
             GameMode.FiveLaneDrums => MoonChart.GameMode.Drums,
 
             GameMode.ProGuitar => MoonChart.GameMode.ProGuitar,
-            // GameMode.ProKeys => MoonChart.GameMode.ProKeys,
+            GameMode.ProKeys => MoonChart.GameMode.ProKeys,
 
             GameMode.Vocals => MoonChart.GameMode.Vocals,
 
@@ -458,7 +433,7 @@ namespace YARG.Core.Chart
             Instrument.ProBass_17Fret   => MoonSong.MoonInstrument.ProBass_17Fret,
             Instrument.ProBass_22Fret   => MoonSong.MoonInstrument.ProBass_22Fret,
 
-            // Instrument.ProKeys => MoonSong.MoonInstrument.ProKeys,
+            Instrument.ProKeys => MoonSong.MoonInstrument.ProKeys,
 
             // Vocals and harmony need to be handled specially
             // Instrument.Vocals  => MoonSong.MoonInstrument.Vocals,

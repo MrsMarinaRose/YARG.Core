@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace YARG.Core.Game
@@ -15,6 +15,9 @@ namespace YARG.Core.Game
         NoteShuffle   = 1 << 5,
         NoKicks       = 1 << 6,
         UnpitchedOnly = 1 << 7,
+        NoDynamics    = 1 << 8,
+        NoVocalPercussion = 1 << 9,
+        RangeCompress = 1 << 10,
     }
 
     public static class ModifierConflicts
@@ -38,21 +41,24 @@ namespace YARG.Core.Game
             return gameMode switch
             {
                 GameMode.FiveFretGuitar =>
-                    Modifier.AllStrums   |
-                    Modifier.AllHopos    |
-                    Modifier.AllTaps     |
-                    Modifier.HoposToTaps |
-                    Modifier.TapsToHopos,
+                    Modifier.AllStrums     |
+                    Modifier.AllHopos      |
+                    Modifier.AllTaps       |
+                    Modifier.HoposToTaps   |
+                    Modifier.TapsToHopos   |
+                    Modifier.RangeCompress,
 
                 GameMode.FourLaneDrums or
                 GameMode.FiveLaneDrums =>
-                    Modifier.NoKicks,
+                    Modifier.NoKicks    |
+                    Modifier.NoDynamics,
 
                 GameMode.Vocals =>
-                    Modifier.UnpitchedOnly,
+                    Modifier.UnpitchedOnly |
+                    Modifier.NoVocalPercussion,
 
                 GameMode.SixFretGuitar or
-            //  GameMode.TrueDrums     or
+            //  GameMode.EliteDrums    or
                 GameMode.ProGuitar     or
             //  GameMode.Dj            or
                 GameMode.ProKeys       => Modifier.None,

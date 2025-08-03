@@ -7,58 +7,55 @@ namespace YARG.Core.IO
     /// <summary>
     /// A FileInfo structure that only contains the filename and time last added
     /// </summary>
-    public sealed class AbridgedFileInfo
+    public readonly struct AbridgedFileInfo
     {
-        public const FileAttributes RECALL_ON_DATA_ACCESS = (FileAttributes)0x00400000;
-
         /// <summary>
-        /// The flie path
+        /// The file path
         /// </summary>
         public readonly string FullName;
 
         /// <summary>
         /// The time the file was last written or created on OS - whichever came later
         /// </summary>
-        public readonly DateTime LastUpdatedTime;
+        public readonly DateTime LastWriteTime;
 
-        public AbridgedFileInfo(string file, bool checkCreationTime = true)
-            : this(new FileInfo(file), checkCreationTime) { }
+        public AbridgedFileInfo(string file)
+            : this(new FileInfo(file)) {}
 
-        public AbridgedFileInfo(FileSystemInfo info, bool checkCreationTime = true)
+        public AbridgedFileInfo(FileInfo info)
         {
             FullName = info.FullName;
-            LastUpdatedTime = info.LastWriteTime;
-            if (checkCreationTime && info.CreationTime > LastUpdatedTime)
-            {
-                LastUpdatedTime = info.CreationTime;
-            }
+            LastWriteTime = NormalizedLastWrite(info);
         }
 
         /// <summary>
         /// Only used when validation of the underlying file is not required
         /// </summary>
-        public AbridgedFileInfo(BinaryReader reader)
-            : this(reader.ReadString(), reader) { }
+        public AbridgedFileInfo(ref FixedArrayStream stream)
+        {
+            FullName = stream.ReadString();
+            LastWriteTime = DateTime.FromBinary(stream.Read<long>(Endianness.Little));
+        }
 
         /// <summary>
         /// Only used when validation of the underlying file is not required
         /// </summary>
-        public AbridgedFileInfo(string filename, BinaryReader reader)
+        public AbridgedFileInfo(string filename, ref FixedArrayStream stream)
         {
             FullName = filename;
-            LastUpdatedTime = DateTime.FromBinary(reader.ReadInt64());
+            LastWriteTime = DateTime.FromBinary(stream.Read<long>(Endianness.Little));
         }
 
-        public AbridgedFileInfo(string fullname, DateTime timeAdded)
+        public AbridgedFileInfo(string filename, in DateTime lastUpdatedTime)
         {
-            FullName = fullname;
-            LastUpdatedTime = timeAdded;
+            FullName = filename;
+            LastWriteTime = lastUpdatedTime;
         }
 
-        public void Serialize(BinaryWriter writer)
+        public void Serialize(MemoryStream stream)
         {
-            writer.Write(FullName);
-            writer.Write(LastUpdatedTime.ToBinary());
+            stream.Write(FullName);
+            stream.Write(LastWriteTime.ToBinary(), Endianness.Little);
         }
 
         public bool Exists()
@@ -66,48 +63,45 @@ namespace YARG.Core.IO
             return File.Exists(FullName);
         }
 
-        public bool IsStillValid(bool checkCreationTime = true)
+        public bool IsStillValid()
         {
-            var info = new FileInfo(FullName);
-            if (!info.Exists)
-            {
-                return false;
-            }
+            return Validate(FullName, in LastWriteTime);
+        }
 
-            var timeToCompare = info.LastWriteTime;
-            if (checkCreationTime && info.CreationTime > timeToCompare)
-            {
-                timeToCompare = info.CreationTime;
-            }
-            return timeToCompare == LastUpdatedTime;
+        public static DateTime NormalizedLastWrite(FileInfo info)
+        {
+            return info.LastWriteTime > info.CreationTime ? info.LastWriteTime : info.CreationTime;
         }
 
         /// <summary>
         /// Used for cache validation
         /// </summary>
-        public static AbridgedFileInfo? TryParseInfo(BinaryReader reader, bool checkCreationTime = true)
+        public static bool TryParseInfo(ref FixedArrayStream stream, out AbridgedFileInfo abridged)
         {
-            return TryParseInfo(reader.ReadString(), reader, checkCreationTime);
+            return TryParseInfo(stream.ReadString(), ref stream, out abridged);
         }
 
         /// <summary>
         /// Used for cache validation
         /// </summary>
-        public static AbridgedFileInfo? TryParseInfo(string file, BinaryReader reader, bool checkCreationTime = true)
+        public static bool TryParseInfo(string file, ref FixedArrayStream stream, out AbridgedFileInfo abridged)
         {
             var info = new FileInfo(file);
             if (!info.Exists)
             {
-                reader.BaseStream.Position += sizeof(long);
-                return null;
+                stream.Position += sizeof(long);
+                abridged = default;
+                return false;
             }
 
-            var abridged = new AbridgedFileInfo(info, checkCreationTime);
-            if (abridged.LastUpdatedTime != DateTime.FromBinary(reader.ReadInt64()))
-            {
-                return null;
-            }
-            return abridged;
+            abridged = new AbridgedFileInfo(info);
+            return abridged.LastWriteTime == DateTime.FromBinary(stream.Read<long>(Endianness.Little));
+        }
+
+        public static bool Validate(string file, in DateTime lastWrite)
+        {
+            var info = new FileInfo(file);
+            return info.Exists && NormalizedLastWrite(info) == lastWrite;
         }
     }
 }

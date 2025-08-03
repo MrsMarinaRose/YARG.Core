@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.Linq;
 
 namespace YARG.Core.Chart
 {
@@ -69,6 +70,11 @@ namespace YARG.Core.Chart
         /// Whether or not this note is a vocal phrase.
         /// </summary>
         public bool IsPhrase => Type == VocalNoteType.Phrase;
+
+        /// <summary>
+        /// Whether or not this note is a vocal phrase that contains no notes.
+        /// </summary>
+        public bool IsEmptyPhrase => Type == VocalNoteType.Phrase && ChildNotes.Count == 0;
 
         /// <summary>
         /// Creates a new <see cref="VocalNote"/> with the given properties.
@@ -153,58 +159,45 @@ namespace YARG.Core.Chart
             return ChildNotes[^1].Pitch;
         }
 
-        /// <summary>
-        /// Adds a child note to this vocal note.
-        /// Use <see cref="AddNoteToPhrase"/> instead if this is a phrase!
-        /// </summary>
         public override void AddChildNote(VocalNote note)
         {
+            /*
+             TODO Add same child note checking like the other instruments
+             (but I have no idea how vocals works) - Riley
+            */
+
             if (IsPhrase)
             {
-                throw new InvalidOperationException(
-                    "Called `AddChildNote` on a phrase. Use `AddNoteToPhrase` instead!");
+                if (note.Tick < Tick) return;
+
+                _childNotes.Add(note);
+
+                // Sort child notes by tick
+                _childNotes.Sort((note1, note2) =>
+                {
+                    if (note1.Tick > note2.Tick) return 1;
+                    if (note1.Tick < note2.Tick) return -1;
+                    return 0;
+                });
             }
-
-            if (note.Tick <= Tick || note.ChildNotes.Count > 0) return;
-
-            _childNotes.Add(note);
-
-            // Sort child notes by tick
-            _childNotes.Sort((note1, note2) =>
+            else
             {
-                if (note1.Tick > note2.Tick) return 1;
-                if (note1.Tick < note2.Tick) return -1;
-                return 0;
-            });
+                if (note.Tick <= Tick || note.ChildNotes.Count > 0) return;
 
-            // Track total length
-            TotalTimeLength = _childNotes[^1].TimeEnd - Time;
-            TotalTickLength = _childNotes[^1].TickEnd - Tick;
-        }
+                _childNotes.Add(note);
 
-        /// <summary>
-        /// Adds a child note to this vocal phrase.
-        /// Use <see cref="AddChildNote"/> instead if this is a note!
-        /// </summary>
-        public void AddNoteToPhrase(VocalNote note)
-        {
-            if (!IsPhrase)
-            {
-                throw new InvalidOperationException(
-                    "Called `AddNoteToPhrase` on a non-phrase note. Use `AddChildNote` instead!");
+                // Sort child notes by tick
+                _childNotes.Sort((note1, note2) =>
+                {
+                    if (note1.Tick > note2.Tick) return 1;
+                    if (note1.Tick < note2.Tick) return -1;
+                    return 0;
+                });
+
+                // Track total length
+                TotalTimeLength = _childNotes[^1].TimeEnd - Time;
+                TotalTickLength = _childNotes[^1].TickEnd - Tick;
             }
-
-            if (note.Tick < Tick) return;
-
-            _childNotes.Add(note);
-
-            // Sort child notes by tick
-            _childNotes.Sort((note1, note2) =>
-            {
-                if (note1.Tick > note2.Tick) return 1;
-                if (note1.Tick < note2.Tick) return -1;
-                return 0;
-            });
         }
 
         protected override void CopyFlags(VocalNote other)
@@ -217,15 +210,9 @@ namespace YARG.Core.Chart
             return new(this);
         }
 
-        public VocalNote CloneAsPhrase()
+        public void RemovePercussionChildNotes()
         {
-            var newPhrase = CloneNote();
-            foreach (var child in _childNotes)
-            {
-                newPhrase.AddNoteToPhrase(child.Clone());
-            }
-
-            return newPhrase;
+            _childNotes.RemoveAll(e => e.Type == VocalNoteType.Percussion);
         }
     }
 

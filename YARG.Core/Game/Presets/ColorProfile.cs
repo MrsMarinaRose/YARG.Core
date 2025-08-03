@@ -1,6 +1,7 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.IO;
 using Newtonsoft.Json;
+using YARG.Core.Game.Settings;
 using YARG.Core.Utility;
 
 namespace YARG.Core.Game
@@ -23,9 +24,15 @@ namespace YARG.Core.Game
         [JsonIgnore]
         public int Version = COLOR_PROFILE_VERSION;
 
+        [SettingSubSection]
         public FiveFretGuitarColors FiveFretGuitar;
-        public FourLaneDrumsColors  FourLaneDrums;
-        public FiveLaneDrumsColors  FiveLaneDrums;
+        [SettingSubSection]
+        public FourLaneDrumsColors FourLaneDrums;
+        [SettingSubSection]
+        public FiveLaneDrumsColors FiveLaneDrums;
+        [SettingSubSection]
+        public ProKeysColors ProKeys;
+        [SettingSubSection]
         public SixFretGuitarColors SixFretGuitar;
 
         public ColorProfile(string name, bool defaultPreset = false) : base(name, defaultPreset)
@@ -33,6 +40,7 @@ namespace YARG.Core.Game
             FiveFretGuitar = new FiveFretGuitarColors();
             FourLaneDrums = new FourLaneDrumsColors();
             FiveLaneDrums = new FiveLaneDrumsColors();
+            ProKeys = new ProKeysColors();
             SixFretGuitar = new SixFretGuitarColors();
         }
 
@@ -43,6 +51,7 @@ namespace YARG.Core.Game
                 FiveFretGuitar = FiveFretGuitar.Copy(),
                 FourLaneDrums = FourLaneDrums.Copy(),
                 FiveLaneDrums = FiveLaneDrums.Copy(),
+                ProKeys = ProKeys.Copy(),
                 SixFretGuitar = SixFretGuitar.Copy()
             };
         }
@@ -55,6 +64,7 @@ namespace YARG.Core.Game
             FiveFretGuitar.Serialize(writer);
             FourLaneDrums.Serialize(writer);
             FiveLaneDrums.Serialize(writer);
+            ProKeys.Serialize(writer);
             SixFretGuitar.Serialize(writer);
         }
 
@@ -66,6 +76,7 @@ namespace YARG.Core.Game
             FiveFretGuitar.Deserialize(reader, version);
             FourLaneDrums.Deserialize(reader, version);
             FiveLaneDrums.Deserialize(reader, version);
+            ProKeys.Deserialize(reader, version);
             SixFretGuitar.Deserialize(reader, version);
         }
     }

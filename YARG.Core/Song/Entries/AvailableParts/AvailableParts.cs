@@ -1,15 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using YARG.Core.Chart;
-using YARG.Core.IO;
-using YARG.Core.Song.Preparsers;
 
 namespace YARG.Core.Song
 {
     [Serializable]
-    public partial struct AvailableParts
+    public struct AvailableParts
     {
         public static readonly AvailableParts Default = new()
         {
@@ -29,7 +23,7 @@ namespace YARG.Core.Song
             ProDrums = PartValues.Default,
             FiveLaneDrums = PartValues.Default,
 
-            // TrueDrums = PartValues.Default,
+            EliteDrums = PartValues.Default,
 
             ProGuitar_17Fret = PartValues.Default,
             ProGuitar_22Fret = PartValues.Default,
@@ -61,7 +55,7 @@ namespace YARG.Core.Song
         public PartValues ProDrums;
         public PartValues FiveLaneDrums;
 
-        // public PartValues TrueDrums;
+        public PartValues EliteDrums;
 
         public PartValues ProGuitar_17Fret;
         public PartValues ProGuitar_22Fret;
@@ -69,8 +63,6 @@ namespace YARG.Core.Song
         public PartValues ProBass_22Fret;
 
         public PartValues ProKeys;
-
-        // private PartValues DJ;
 
         public PartValues LeadVocals;
         public PartValues HarmonyVocals;

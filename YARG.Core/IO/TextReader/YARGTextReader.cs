@@ -4,177 +4,284 @@ using YARG.Core.Extensions;
 
 namespace YARG.Core.IO
 {
-    public static class YARGTextLoader
+    public static class TextConstants<TChar>
+            where TChar : unmanaged
     {
-        private static readonly UTF32Encoding UTF32BE = new(true, false);
+        public static readonly TChar NEWLINE;
+        public static readonly TChar OPEN_BRACKET;
+        public static readonly TChar CLOSE_BRACE;
 
-        public static YARGTextReader<byte, ByteStringDecoder>? TryLoadByteText(byte[] data)
+        static unsafe TextConstants()
         {
-            if ((data[0] == 0xFF && data[1] == 0xFE) || (data[0] == 0xFE && data[1] == 0xFF))
-                return null;
-
-            int position = data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF ? 3 : 0;
-            return new YARGTextReader<byte, ByteStringDecoder>(data, position);
-        }
-
-        public static YARGTextReader<char, CharStringDecoder> LoadCharText(byte[] data)
-        {
-            char[] charData;
-            if (data[0] == 0xFF && data[1] == 0xFE)
-            {
-                if (data[2] != 0)
-                    charData = Encoding.Unicode.GetChars(data, 2, data.Length - 2);
-                else
-                    charData = Encoding.UTF32.GetChars(data, 3, data.Length - 3);
-            }
-            else
-            {
-                if (data[2] != 0)
-                    charData = Encoding.BigEndianUnicode.GetChars(data, 2, data.Length - 2);
-                else
-                    charData = UTF32BE.GetChars(data, 3, data.Length - 3);
-            }
-            return new YARGTextReader<char, CharStringDecoder>(charData, 0);
+            int newline = '\n';
+            int openBracket = '[';
+            int closeBrace = '}';
+            NEWLINE = *(TChar*) &newline;
+            OPEN_BRACKET = *(TChar*) &openBracket;
+            CLOSE_BRACE = *(TChar*) &closeBrace;
         }
     }
 
     public static class YARGTextReader
     {
-        public static char SkipWhitespace<TChar>(YARGTextContainer<TChar> container)
+        public static readonly Encoding Latin1 = Encoding.GetEncoding(28591);
+        public static readonly Encoding UTF8Strict = new UTF8Encoding(false, true);
+        public const int WHITESPACE_LIMIT = 32;
+
+        public static bool TryUTF8(FixedArray<byte> data, out YARGTextContainer<byte> container)
+        {
+            // If it doesn't throw with `At(1)`, then 0 and 1 are valid indices.
+            // We can therefore skip bounds checking
+            if ((data.At(1) == 0xFE && data[0] == 0xFF) || (data[0] == 0xFE && data[1] == 0xFF))
+            {
+                container = default;
+                return false;
+            }
+
+            container = new YARGTextContainer<byte>(data, UTF8Strict);
+            // Same idea as above, but with index `2` instead
+            if (data.At(2) == 0xBF && data[0] == 0xEF && data[1] == 0xBB)
+            {
+                container.Position += 3;
+            }
+            SkipPureWhitespace(ref container);
+            return true;
+        }
+
+        public static FixedArray<char>? TryUTF16Cast(FixedArray<byte> data)
+        {
+            var buffer = default(FixedArray<char>);
+            if (data.At(2) != 0)
+            {
+                const int UTF16BOM_OFFSET = 2;
+                int length = (data.Length - UTF16BOM_OFFSET) / sizeof(char);
+                if ((data[0] == 0xFF) != BitConverter.IsLittleEndian)
+                {
+                    // We have to swap the endian of the data so string conversion works properly
+                    // but we can't just use the original buffer as we create a hash off it.
+                    buffer = FixedArray<char>.Alloc(length);
+
+                    for (int i = 0, j = UTF16BOM_OFFSET; i < buffer.Length; ++i, j += sizeof(char))
+                    {
+                        buffer[i] = (char) (data[j] << 8 | data[j + 1]);
+                    }
+                }
+                else
+                {
+                    buffer = FixedArray<char>.Cast(data, UTF16BOM_OFFSET, length);
+                }
+            }
+            return buffer;
+        }
+
+        public static YARGTextContainer<char> CreateUTF16Container(FixedArray<char> data)
+        {
+            var container = new YARGTextContainer<char>(data, Encoding.Unicode);
+            SkipPureWhitespace(ref container);
+            return container;
+        }
+
+        public static FixedArray<int> CastUTF32(FixedArray<byte> data)
+        {
+            const int UTF32BOM_OFFSET = 3;
+
+            FixedArray<int> buffer;
+            int length = (data.Length - UTF32BOM_OFFSET) / sizeof(int);
+
+            // We already know by this point that index `0` is valid
+            if ((data[0] == 0xFF) != BitConverter.IsLittleEndian)
+            {
+                // We have to swap the endian of the data so string conversion works properly
+                // but we can't just use the original buffer as we create a hash off it.
+                buffer = FixedArray<int>.Alloc(length);
+                for (int i = 0, j = UTF32BOM_OFFSET; i < buffer.Length; ++i, j += sizeof(int))
+                {
+                    buffer[i] = data[j] << 24 |
+                                data[j + 1] << 16 |
+                                data[j + 2] << 16 |
+                                data[j + 3];
+                }
+            }
+            else
+            {
+                buffer = FixedArray<int>.Cast(data, UTF32BOM_OFFSET, length);
+            }
+            return buffer;
+        }
+
+        public static YARGTextContainer<int> CreateUTF32Container(FixedArray<int> data)
+        {
+            var container = new YARGTextContainer<int>(data, Encoding.UTF32);
+            SkipPureWhitespace(ref container);
+            return container;
+        }
+
+        public static void SkipPureWhitespace<TChar>(ref YARGTextContainer<TChar> container)
             where TChar : unmanaged, IConvertible
         {
-            while (container.Position < container.Length)
+            // Unity/Mono has a bug on the commented-out code here, where the JIT generates a useless
+            // `cmp dword ptr [rax], 0` before actually performing ToInt32(null).
+            // This causes an access violation (which translates to a NullReferenceException here) on
+            // memory-mapped files whose size on disk is 2 or less bytes greater than the actual file contents,
+            // due to the `cmp` above over-reading data from `rax` (which contains Position in that moment).
+            //
+            // Explicitly dereferencing the pointer into a value first avoids this issue. The useless `cmp`
+            // is still generated, but now `rax` points to the stack, and so the over-read is always done in
+            // a valid memory space.
+            //
+            // 9/28 Edit: However, now that fixedArray removed memorymappedfile functionality, the overread is a non-issue
+            // in terms of causing any actual access violation errors
+            while (!container.IsAtEnd() && container.Get() <= WHITESPACE_LIMIT)
             {
-                char ch = container.Data[container.Position].ToChar(null);
-                if (ch <= 32)
-                {
-                    if (ch == '\n')
-                        return ch;
-                }
-                else if (ch != '=')
-                    return ch;
                 ++container.Position;
             }
-            return (char) 0;
         }
-    }
 
-    public sealed class YARGTextReader<TChar, TDecoder>
-        where TChar : unmanaged, IConvertible
-        where TDecoder : IStringDecoder<TChar>, new()
-    {
-        private readonly TDecoder decoder = new();
-        public readonly YARGTextContainer<TChar> Container;
-
-        public YARGTextReader(TChar[] data, int position)
+        /// <summary>
+        /// Skips all whitespace starting at the current position of the provided container,
+        /// until the end of the current line.
+        /// </summary>
+        /// <remarks>"\n" is not included as whitespace in this version</remarks>
+        /// <typeparam name="TChar">Type of data contained</typeparam>
+        /// <param name="container">Buffer of data</param>
+        /// <returns>The current character that halted skipping, or 0 if at EoF</returns>
+        public static int SkipWhitespace<TChar>(ref YARGTextContainer<TChar> container)
+            where TChar : unmanaged, IConvertible
         {
-            Container = new YARGTextContainer<TChar>(data, position);
-            while (Container.Position < Container.Length)
+            while (!container.IsAtEnd())
             {
-                char curr = Container.Data[Container.Position].ToChar(null);
-                if (curr > 32 && curr != '{' && curr != '=')
+                int ch = container.Get();
+                if (ch > WHITESPACE_LIMIT || ch == '\n')
                 {
-                    break;
+                    return ch;
                 }
-                ++Container.Position;
+                ++container.Position;
             }
+            return 0;
         }
 
-        public char SkipWhitespace()
+        public static void SkipWhitespaceAndEquals<TChar>(ref YARGTextContainer<TChar> container)
+            where TChar : unmanaged, IConvertible
         {
-            return YARGTextReader.SkipWhitespace(Container);
-        }
-
-        public void GotoNextLine()
-        {
-            char curr = default;
-            while (Container.Position < Container.Length)
+            while (!container.IsAtEnd())
             {
-                curr = Container.Data[Container.Position].ToChar(null);
-                ++Container.Position;
-                if (curr == '\n')
+                int ch = container.Get();
+                if (ch <= WHITESPACE_LIMIT)
                 {
-                    break;
-                }
-            }
-
-            while (Container.Position < Container.Length)
-            {
-                curr = Container.Data[Container.Position].ToChar(null);
-                if (curr > 32 && curr != '{' && curr != '=')
-                {
-                    break;
-
-                }
-                ++Container.Position;
-            }
-        }
-
-        public void SkipLinesUntil(char stopCharacter)
-        {
-            GotoNextLine();
-            while (Container.Position < Container.Length)
-            {
-                if (Container.Data[Container.Position].ToChar(null) == stopCharacter)
-                {
-                    // Runs a check to ensure that the character is the start of the line
-                    int test = Container.Position - 1;
-                    char character = Container.Data[test].ToChar(null);
-                    while (test > 0 && character <= 32 && character != '\n')
+                    if (ch == '\n')
                     {
-                        --test;
-                        character = Container.Data[test].ToChar(null);
+                        break;
+                    }
+                }
+                else if (ch != '=')
+                {
+                    break;
+                }
+                ++container.Position;
+            }
+        }
+
+        public static void GotoNextLine<TChar>(ref YARGTextContainer<TChar> container)
+            where TChar : unmanaged, IConvertible, IEquatable<TChar>
+        {
+            int index = container.GetSpanOfRemainder().IndexOf(TextConstants<TChar>.NEWLINE);
+            if (index >= 0)
+            {
+                container.Position += index;
+                SkipPureWhitespace(ref container);
+            }
+            else
+            {
+                container.Position = container.Length;
+            }
+        }
+
+        public static bool SkipLinesUntil<TChar>(ref YARGTextContainer<TChar> container, TChar stopCharacter)
+            where TChar : unmanaged, IConvertible, IEquatable<TChar>
+        {
+            GotoNextLine(ref container);
+            while (true)
+            {
+                int i = container.GetSpanOfRemainder().IndexOf(stopCharacter);
+                if (i == -1)
+                {
+                    container.Position = container.Length;
+                    return false;
+                }
+
+                container.Position += i;
+
+                int limit = -i;
+                for (int test = -1; test >= limit; --test)
+                {
+                    int val = container[test];
+                    if (val == '\n')
+                    {
+                        return true;
                     }
 
-                    if (character == '\n')
+                    if (val > WHITESPACE_LIMIT)
+                    {
                         break;
+                    }
                 }
-                ++Container.Position;
+                ++container.Position;
             }
         }
 
-        public string ExtractModifierName()
+        public static unsafe string ExtractModifierName<TChar>(ref YARGTextContainer<TChar> container)
+            where TChar : unmanaged, IConvertible
         {
-            int curr = Container.Position;
-            while (curr < Container.Length)
+            int length = 0;
+            while (container.Position + length < container.Length)
             {
-                char b = Container.Data[curr].ToChar(null);
-                if (b <= 32 || b == '=')
+                int val = container[length];
+                if (val <= WHITESPACE_LIMIT || val == '=')
+                {
                     break;
-                ++curr;
+                }
+                ++length;
             }
 
-            string name = decoder.Decode(Container.Data, Container.Position, curr - Container.Position);
-            Container.Position = curr;
-            SkipWhitespace();
+            string name = Decode(container.PositionPointer, length, ref container);
+            container.Position += length;
+            SkipWhitespaceAndEquals(ref container);
             return name;
         }
 
-        public string PeekLine()
+        public static unsafe string PeekLine<TChar>(ref YARGTextContainer<TChar> container)
+            where TChar : unmanaged, IConvertible, IEquatable<TChar>
         {
-            var curr = Container.Position;
-            while (curr < Container.Length && Container.Data[curr].ToChar(null) != '\n')
+            var span = container.GetSpanOfRemainder();
+            long length = span.IndexOf(TextConstants<TChar>.NEWLINE);
+            if (length == -1)
             {
-                ++curr;
+                length = span.Length;
             }
-            return decoder.Decode(Container.Data, Container.Position, curr - Container.Position).TrimEnd();
+
+            while (length > 0 && span[(int)(length - 1)].ToInt32(null) <= WHITESPACE_LIMIT)
+            {
+                --length;
+            }
+            return Decode(container.PositionPointer, length, ref container).TrimEnd();
         }
 
-        public string ExtractText(bool isChartFile)
+        public static unsafe string ExtractText<TChar>(ref YARGTextContainer<TChar> container, bool isChartFile)
+            where TChar : unmanaged, IConvertible
         {
-            var stringBegin = Container.Position;
-            var stringEnd = -1;
-            if (isChartFile && Container.Position < Container.Length && Container.Data[Container.Position].ToChar(null) == '\"')
+            long stringBegin = container.Position;
+            long stringEnd = -1;
+            if (isChartFile && !container.IsAtEnd() && container.Get() == '\"')
             {
                 while (true)
                 {
-                    ++Container.Position;
-                    if (Container.Position == Container.Length)
+                    ++container.Position;
+                    if (container.IsAtEnd())
                     {
                         break;
                     }
 
-                    char ch = Container.Data[Container.Position].ToChar(null);
+                    int ch = container.Get();
                     if (ch == '\n')
                     {
                         break;
@@ -182,23 +289,23 @@ namespace YARG.Core.IO
 
                     if (stringEnd == -1)
                     {
-                        if (ch == '\"' && Container.Data[Container.Position - 1].ToChar(null) != '\\')
+                        if (ch == '\"' && container.PositionPointer[-1].ToInt32(null) != '\\')
                         {
                             ++stringBegin;
-                            stringEnd = Container.Position;
+                            stringEnd = container.Position;
                         }
                         else if (ch == '\r')
                         {
-                            stringEnd = Container.Position;
+                            stringEnd = container.Position;
                         }
                     }
                 }
             }
             else
             {
-                while (Container.Position < Container.Length)
+                while (!container.IsAtEnd())
                 {
-                    char ch = Container.Data[Container.Position].ToChar(null);
+                    int ch = container.Get();
                     if (ch == '\n')
                     {
                         break;
@@ -206,148 +313,304 @@ namespace YARG.Core.IO
 
                     if (ch == '\r' && stringEnd == -1)
                     {
-                        stringEnd = Container.Position;
+                        stringEnd = container.Position;
                     }
-                    ++Container.Position;
+                    ++container.Position;
                 }
             }
 
             if (stringEnd == -1)
             {
-                stringEnd = Container.Position;
+                stringEnd = container.Position;
             }
 
-            while (stringBegin < stringEnd && Container.Data[stringEnd - 1].ToChar(null) <= 32)
+            while (stringEnd > stringBegin && container.GetBuffer()[stringEnd - 1].ToInt32(null) <= WHITESPACE_LIMIT)
+            {
                 --stringEnd;
+            }
 
-            return decoder.Decode(Container.Data, stringBegin, stringEnd - stringBegin);
+            return Decode(container.GetBuffer() + stringBegin, stringEnd - stringBegin, ref container);
         }
 
-        public bool ExtractBoolean()
+        public static bool ExtractBoolean<TChar>(in YARGTextContainer<TChar> text)
+            where TChar : unmanaged, IConvertible
         {
-            bool result = Container.ExtractBoolean();
-            SkipWhitespace();
-            return result;
+            return !text.IsAtEnd() && text.Get() switch
+            {
+                '1' => true,
+                _ => text.Position + 4 <= text.Length &&
+                    (text[0] | CharacterExtensions.ASCII_LOWERCASE_FLAG) is 't' &&
+                    (text[1] | CharacterExtensions.ASCII_LOWERCASE_FLAG) is 'r' &&
+                    (text[2] | CharacterExtensions.ASCII_LOWERCASE_FLAG) is 'u' &&
+                    (text[3] | CharacterExtensions.ASCII_LOWERCASE_FLAG) is 'e',
+            };
         }
 
-        public short ExtractInt16()
+        public static bool TryExtract<TChar, TNumber>(ref YARGTextContainer<TChar> text, out TNumber value)
+            where TChar : unmanaged, IConvertible
+            where TNumber : unmanaged, IComparable, IComparable<TNumber>, IConvertible, IEquatable<TNumber>, IFormattable
         {
-            short result = Container.ExtractInt16();
-            SkipWhitespace();
-            return result;
-        }
-
-        public ushort ExtractUInt16()
-        {
-            ushort result = Container.ExtractUInt16();
-            SkipWhitespace();
-            return result;
-        }
-
-        public int ExtractInt32()
-        {
-            int result = Container.ExtractInt32();
-            SkipWhitespace();
-            return result;
-        }
-
-        public uint ExtractUInt32()
-        {
-            uint result = Container.ExtractUInt32();
-            SkipWhitespace();
-            return result;
-        }
-
-        public long ExtractInt64()
-        {
-            long result = Container.ExtractInt64();
-            SkipWhitespace();
-            return result;
-        }
-
-        public ulong ExtractUInt64()
-        {
-            ulong result = Container.ExtractUInt64();
-            SkipWhitespace();
-            return result;
-        }
-
-        public float ExtractFloat()
-        {
-            float result = Container.ExtractFloat();
-            SkipWhitespace();
-            return result;
-        }
-
-        public double ExtractDouble()
-        {
-            double result = Container.ExtractDouble();
-            SkipWhitespace();
-            return result;
-        }
-
-        public bool ExtractInt16(out short value)
-        {
-            if (!Container.ExtractInt16(out value))
+            value = default;
+            if (text.IsAtEnd())
+            {
                 return false;
-            SkipWhitespace();
+            }
+
+            int ch = text.Get();
+            long sign = 1;
+
+            bool signedType = typeof(TNumber) == typeof(long)
+                || typeof(TNumber) == typeof(int)
+                || typeof(TNumber) == typeof(short);
+
+            switch (ch)
+            {
+                case '-':
+                    if (!signedType)
+                    {
+                        return false;
+                    }
+                    sign = -1;
+                    goto case '+';
+                case '+':
+                    ++text.Position;
+                    if (text.IsAtEnd())
+                    {
+                        return false;
+                    }
+                    ch = text.Get();
+                    break;
+            }
+
+            if (ch < '0' || '9' < ch)
+            {
+                return false;
+            }
+
+            ulong softMax;
+            if (typeof(TNumber) == typeof(ulong))
+            {
+                softMax = ulong.MaxValue / 10;
+            }
+            else if (typeof(TNumber) == typeof(uint))
+            {
+                softMax = uint.MaxValue / 10;
+            }
+            else if (typeof(TNumber) == typeof(ushort))
+            {
+                softMax = ushort.MaxValue / 10;
+            }
+            else if (typeof(TNumber) == typeof(long))
+            {
+                softMax = long.MaxValue / 10;
+            }
+            else if (typeof(TNumber) == typeof(int))
+            {
+                softMax = int.MaxValue / 10;
+            }
+            else
+            {
+                softMax = (ulong)short.MaxValue / 10;
+            }
+
+            char lastDigit = signedType ? '7' : '5';
+
+            ulong tmp = 0;
+            while (true)
+            {
+                tmp += (ulong) ch - '0';
+
+                ++text.Position;
+                if (text.IsAtEnd())
+                {
+                    break;
+                }
+
+                ch = text.Get();
+                if (ch < '0' || '9' < ch)
+                {
+                    break;
+                }
+
+                if (tmp < softMax || (tmp == softMax && ch <= lastDigit))
+                {
+                    tmp *= 10;
+                    continue;
+                }
+
+                while (!text.IsAtEnd())
+                {
+                    ch = text.Get();
+                    if (ch < '0' || '9' < ch)
+                    {
+                        break;
+                    }
+                    ++text.Position;
+                }
+
+                if (typeof(TNumber) == typeof(ulong))
+                {
+                    value = (TNumber)(object)ulong.MaxValue;
+                }
+                else if (typeof(TNumber) == typeof(uint))
+                {
+                    value = (TNumber)(object)uint.MaxValue;
+                }
+                else if (typeof(TNumber) == typeof(ushort))
+                {
+                    value = (TNumber)(object)ushort.MaxValue;
+                }
+                else if (typeof(TNumber) == typeof(long))
+                {
+                    value = (TNumber)(object)(sign == 1 ? long.MaxValue : long.MinValue);
+                }
+                else if (typeof(TNumber) == typeof(int))
+                {
+                    value = (TNumber)(object)(sign == 1 ? int.MaxValue : int.MinValue);
+                }
+                else
+                {
+                    value = (TNumber)(object)(sign == 1 ? short.MaxValue : short.MinValue);
+                }
+                return true;
+            }
+
+            unsafe
+            {
+                if (signedType)
+                {
+                    long signed = (long) tmp * sign;
+                    value = *(TNumber*)&signed;
+                }
+                else
+                {
+                    value = *(TNumber*)&tmp;
+                }
+            }
             return true;
         }
 
-        public bool ExtractUInt16(out ushort value)
+        public static bool TryExtract<TChar>(ref YARGTextContainer<TChar> text, out float value)
+            where TChar : unmanaged, IConvertible
         {
-            if (!Container.ExtractUInt16(out value))
+            bool result = TryExtract(ref text, out double tmp);
+            value = (float) tmp;
+            return result;
+        }
+
+        public static bool TryExtract<TChar>(ref YARGTextContainer<TChar> text, out double value)
+            where TChar : unmanaged, IConvertible
+        {
+            value = 0;
+            if (text.IsAtEnd())
+            {
                 return false;
-            SkipWhitespace();
+            }
+
+            int ch = text.Get();
+            double sign = ch == '-' ? -1 : 1;
+
+            if (ch == '-' || ch == '+')
+            {
+                ++text.Position;
+                if (text.IsAtEnd())
+                {
+                    return false;
+                }
+                ch = text.Get();
+            }
+
+            if (ch < '0' || '9' < ch && ch != '.')
+            {
+                return false;
+            }
+
+            while ('0' <= ch && ch <= '9')
+            {
+                value *= 10;
+                value += ch - '0';
+                ++text.Position;
+                if (text.IsAtEnd())
+                {
+                    break;
+                }
+                ch = text.Get();
+            }
+
+            if (ch == '.')
+            {
+                ++text.Position;
+                if (!text.IsAtEnd())
+                {
+                    double divisor = 1;
+                    ch = text.Get();
+                    while ('0' <= ch && ch <= '9')
+                    {
+                        divisor *= 10;
+                        value += (ch - '0') / divisor;
+
+                        ++text.Position;
+                        if (text.IsAtEnd())
+                        {
+                            break;
+                        }
+                        ch = text.Get();
+                    }
+                }
+            }
+
+            value *= sign;
             return true;
         }
 
-        public bool ExtractInt32(out int value)
+        public static bool TryExtractWithWhitespace<TChar, TNumber>(ref YARGTextContainer<TChar> text, out TNumber value)
+            where TChar : unmanaged, IConvertible
+            where TNumber : unmanaged, IComparable, IComparable<TNumber>, IConvertible, IEquatable<TNumber>, IFormattable
         {
-            if (!Container.ExtractInt32(out value))
+            if (!TryExtract(ref text, out value))
+            {
                 return false;
-            SkipWhitespace();
+            }
+            SkipWhitespace(ref text);
             return true;
         }
 
-        public bool ExtractUInt32(out uint value)
+        public static bool TryExtractWithWhitespace<TChar>(ref YARGTextContainer<TChar> text, out float value)
+            where TChar : unmanaged, IConvertible
         {
-            if (!Container.ExtractUInt32(out value))
+            if (!TryExtract(ref text, out value))
+            {
                 return false;
-            SkipWhitespace();
+            }
+            SkipWhitespace(ref text);
             return true;
         }
 
-        public bool ExtractInt64(out long value)
+        public static bool TryExtractWithWhitespace<TChar>(ref YARGTextContainer<TChar> text, out double value)
+            where TChar : unmanaged, IConvertible
         {
-            if (!Container.ExtractInt64(out value))
+            if (!TryExtract(ref text, out value))
+            {
                 return false;
-            SkipWhitespace();
+            }
+            SkipWhitespace(ref text);
             return true;
         }
 
-        public bool ExtractUInt64(out ulong value)
+        private static unsafe string Decode<TChar>(TChar* data, long count, ref YARGTextContainer<TChar> text)
+            where TChar : unmanaged, IConvertible
         {
-            if (!Container.ExtractUInt64(out value))
-                return false;
-            SkipWhitespace();
-            return true;
-        }
-
-        public bool ExtractFloat(out float value)
-        {
-            if (!Container.ExtractFloat(out value))
-                return false;
-            SkipWhitespace();
-            return true;
-        }
-
-        public bool ExtractDouble(out double value)
-        {
-            if (!Container.ExtractDouble(out value))
-                return false;
-            SkipWhitespace();
-            return true;
+            while (true)
+            {
+                try
+                {
+                    return text.Encoding.GetString((byte*) data, (int) (count * sizeof(TChar)));
+                }
+                catch when(ReferenceEquals(text.Encoding, UTF8Strict))
+                {
+                    text.Encoding = Latin1;
+                }
+            }
         }
     }
 }

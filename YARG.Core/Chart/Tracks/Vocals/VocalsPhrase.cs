@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using YARG.Core.Extensions;
 
@@ -17,6 +17,8 @@ namespace YARG.Core.Chart
 
         public bool IsStarPower => PhraseParentNote.IsStarPower;
 
+        public bool IsEmpty => PhraseParentNote.IsEmptyPhrase;
+
         public VocalsPhrase(double time, double timeLength, uint tick, uint tickLength,
             VocalNote phraseParentNote, List<LyricEvent> lyrics)
             : base(time, timeLength, tick, tickLength)
@@ -34,7 +36,7 @@ namespace YARG.Core.Chart
         public VocalsPhrase(VocalsPhrase other)
             : base(other)
         {
-            PhraseParentNote = other.PhraseParentNote.CloneAsPhrase();
+            PhraseParentNote = other.PhraseParentNote.Clone();
             Lyrics = other.Lyrics.Duplicate();
         }
 
