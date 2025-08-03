@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Melanchall.DryWetMidi.Core;
 using YARG.Core.Logging;
-using YARG.Core.Parsing;
+using YARG.Core.Chart.Parsing;
 
 namespace YARG.Core.Chart
 {
